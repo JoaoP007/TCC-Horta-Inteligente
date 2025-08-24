@@ -1,15 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc } from 'firebase/firestore';
-import { Cloud, Thermometer, Droplets, Zap, CircleSlash, Power, Leaf } from 'lucide-react';
+import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query } from 'firebase/firestore';
+import { Cloud, Thermometer, Droplets, CircleSlash, Power, Leaf, Clock, Trash2, PlusCircle } from 'lucide-react';
 
 // Global Firebase variables (these would be provided by the Canvas environment)
-
-// GARANTA que as linhas de configuração são estas:
-const firebaseConfigJson = import.meta.env.VITE_FIREBASE_CONFIG || '{}';
-const appId = import.meta.env.VITE_APP_ID || 'default-smart-garden';
-const initialAuthToken = null; // Não usamos isto no deploy
+const firebaseConfigJson = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-smart-garden';
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
 const firebaseConfig = JSON.parse(firebaseConfigJson);
 
@@ -24,18 +22,19 @@ try {
     db = getFirestore(app);
 } catch (e) {
     console.error("Firebase initialization error:", e);
-    // Fallback for environments where config might be missing during development
     if (!app && Object.keys(firebaseConfig).length === 0) {
         console.warn("Firebase config is empty. App will run with limited functionality.");
     }
 }
 
-// Firestore paths
-const SENSORS_PATH_TEMPLATE = "artifacts/{appId}/public/data/smartGarden/sensors";
-const VALVES_PATH_TEMPLATE = "artifacts/{appId}/public/data/smartGarden/valves";
+// Firestore paths (Corrected Structure)
+// A single document holds the state for sensors and valves.
+const GARDEN_DOC_PATH_TEMPLATE = "artifacts/{appId}/public/data/garden/main"; 
+// Schedules are a sub-collection under the main garden document.
+const SCHEDULES_COLLECTION_PATH_TEMPLATE = "artifacts/{appId}/public/data/garden/main/schedules";
 
-const getSensorsPath = () => SENSORS_PATH_TEMPLATE.replace("{appId}", appId);
-const getValvesPath = () => VALVES_PATH_TEMPLATE.replace("{appId}", appId);
+const getGardenDocPath = () => GARDEN_DOC_PATH_TEMPLATE.replace("{appId}", appId);
+const getSchedulesPath = () => SCHEDULES_COLLECTION_PATH_TEMPLATE.replace("{appId}", appId);
 
 
 // Main App Component
@@ -46,21 +45,21 @@ function App() {
         soilMoisture: 0,
         temperature: 0,
         humidity: 0,
-        lightLevel: 0,
     });
     const [valveStates, setValveStates] = useState({
         valve1: false,
         valve2: false,
     });
+    const [schedules, setSchedules] = useState([]);
+    const [newSchedule, setNewSchedule] = useState({ time: '', valveId: 'valve1' });
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [showMockDataInfo, setShowMockDataInfo] = useState(true);
-
+    
     // Firebase Authentication
     useEffect(() => {
         if (!auth) {
             console.warn("Auth service not available.");
-            setIsAuthReady(true); // Proceed without auth if not available
+            setIsAuthReady(true);
             setIsLoading(false);
             return;
         }
@@ -78,42 +77,34 @@ function App() {
                 } catch (authError) {
                     console.error("Error signing in:", authError);
                     setError("Falha na autenticação. Funcionalidade limitada.");
-                    setIsAuthReady(true); // Still proceed to show UI with error
+                    setIsAuthReady(true);
                 }
             }
         });
         return () => unsubscribe();
     }, []);
 
-    // Initialize/Ensure Firestore documents exist
+    // Initialize/Ensure Firestore document exists
     const ensureFirestoreData = useCallback(async () => {
         if (!db || !isAuthReady || !userId) return;
 
-        const sensorsDocRef = doc(db, getSensorsPath());
-        const valvesDocRef = doc(db, getValvesPath());
+        const gardenDocRef = doc(db, getGardenDocPath());
 
         try {
-            let sensorsDocSnap = await getDoc(sensorsDocRef);
-            if (!sensorsDocSnap.exists()) {
-                await setDoc(sensorsDocRef, {
-                    soilMoisture: 50, // Initial mock data
-                    temperature: 22,
-                    humidity: 60,
-                    lightLevel: 700, // lux
-                    timestamp: new Date().toISOString(),
+            const docSnap = await getDoc(gardenDocRef);
+            if (!docSnap.exists()) {
+                await setDoc(gardenDocRef, {
+                    sensors: {
+                        soilMoisture: 50,
+                        temperature: 22,
+                        humidity: 60,
+                    },
+                    valves: {
+                        valve1: false,
+                        valve2: false,
+                    },
+                    lastUpdated: new Date().toISOString(),
                 });
-                console.log("Mock sensor data initialized.");
-            }
-
-            let valvesDocSnap = await getDoc(valvesDocRef);
-            if (!valvesDocSnap.exists()) {
-                await setDoc(valvesDocRef, {
-                    valve1: false,
-                    valve2: false,
-                    lastUpdatedBy: userId,
-                    timestamp: new Date().toISOString(),
-                });
-                console.log("Valve states initialized.");
             }
         } catch (e) {
             console.error("Error ensuring Firestore data:", e);
@@ -125,84 +116,107 @@ function App() {
     // Firestore Data Subscriptions
     useEffect(() => {
         if (!db || !isAuthReady || !userId) {
-            if (isAuthReady) setIsLoading(false); // If auth is ready but no db/user, stop loading
+            if (isAuthReady) setIsLoading(false);
             return;
         }
         
         ensureFirestoreData().then(() => {
-            const sensorsDocRef = doc(db, getSensorsPath());
-            const valvesDocRef = doc(db, getValvesPath());
-
-            const unsubSensors = onSnapshot(sensorsDocRef, (docSnap) => {
+            // Combined listener for sensors and valves from the main garden document
+            const gardenDocRef = doc(db, getGardenDocPath());
+            const unsubGarden = onSnapshot(gardenDocRef, (docSnap) => {
                 if (docSnap.exists()) {
-                    setSensorData(docSnap.data());
-                    setError(null);
-                } else {
-                    console.warn("Sensor data document does not exist.");
-                    setSensorData({ soilMoisture: 0, temperature: 0, humidity: 0, lightLevel: 0 });
+                    const data = docSnap.data();
+                    setSensorData(data.sensors || { soilMoisture: 0, temperature: 0, humidity: 0 });
+                    setValveStates(data.valves || { valve1: false, valve2: false });
                 }
                 setIsLoading(false);
             }, (err) => {
-                console.error("Error fetching sensor data:", err);
-                setError("Erro ao buscar dados dos sensores.");
+                console.error("Error fetching garden data:", err);
+                setError("Erro ao buscar dados da horta.");
                 setIsLoading(false);
             });
 
-            const unsubValves = onSnapshot(valvesDocRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    setValveStates(docSnap.data());
-                } else {
-                    console.warn("Valve states document does not exist.");
-                    setValveStates({ valve1: false, valve2: false });
-                }
-            }, (err) => {
-                console.error("Error fetching valve states:", err);
-                setError("Erro ao buscar estados das válvulas.");
-            });
+            // Schedules listener (now with a valid collection path)
+            const schedulesCollectionRef = collection(db, getSchedulesPath());
+            const q = query(schedulesCollectionRef);
+            const unsubSchedules = onSnapshot(q, (querySnapshot) => {
+                const schedulesData = [];
+                querySnapshot.forEach((doc) => {
+                    schedulesData.push({ id: doc.id, ...doc.data() });
+                });
+                schedulesData.sort((a, b) => a.time.localeCompare(b.time));
+                setSchedules(schedulesData);
+            }, (err) => console.error("Error fetching schedules:", err));
             
             return () => {
-                unsubSensors();
-                unsubValves();
+                unsubGarden();
+                unsubSchedules();
             };
         });
 
     }, [isAuthReady, userId, ensureFirestoreData]);
 
     const handleValveToggle = async (valveId) => {
-        if (!db || !userId) {
-            setError("Firestore não está pronto ou usuário não autenticado.");
-            return;
-        }
-        const valvesDocRef = doc(db, getValvesPath());
-        const newValveState = !valveStates[valveId];
+        if (!db || !userId) return;
+        const gardenDocRef = doc(db, getGardenDocPath());
         try {
-            await updateDoc(valvesDocRef, {
-                [valveId]: newValveState,
-                lastUpdatedBy: userId,
-                timestamp: new Date().toISOString(),
+            // Use dot notation to update a nested field
+            const fieldPath = `valves.${valveId}`;
+            await updateDoc(gardenDocRef, {
+                [fieldPath]: !valveStates[valveId],
+                lastUpdated: new Date().toISOString(),
             });
         } catch (e) {
             console.error("Error toggling valve:", e);
-            setError("Erro ao atualizar estado da válvula.");
         }
     };
     
-    // Function to update mock sensor data (for demo purposes)
     const updateMockSensorData = async () => {
         if (!db) return;
-        const sensorsDocRef = doc(db, getSensorsPath());
-        const newMockData = {
+        const gardenDocRef = doc(db, getGardenDocPath());
+        const newSensorData = {
             soilMoisture: Math.floor(Math.random() * 101),
-            temperature: Math.floor(Math.random() * 15) + 15, // 15-30 C
-            humidity: Math.floor(Math.random() * 51) + 40,    // 40-90%
-            lightLevel: Math.floor(Math.random() * 801) + 200, // 200-1000 lux
-            timestamp: new Date().toISOString(),
+            temperature: Math.floor(Math.random() * 15) + 15,
+            humidity: Math.floor(Math.random() * 51) + 40,
         };
         try {
-            await setDoc(sensorsDocRef, newMockData);
-            console.log("Mock sensor data updated:", newMockData);
+            await updateDoc(gardenDocRef, {
+                sensors: newSensorData,
+                lastUpdated: new Date().toISOString(),
+            });
         } catch (e) {
             console.error("Error updating mock sensor data:", e);
+        }
+    };
+
+    const handleAddSchedule = async (e) => {
+        e.preventDefault();
+        if (!db || !newSchedule.time) {
+            setError("Por favor, selecione um horário.");
+            return;
+        }
+        const schedulesCollectionRef = collection(db, getSchedulesPath());
+        try {
+            await addDoc(schedulesCollectionRef, {
+                time: newSchedule.time,
+                valveId: newSchedule.valveId,
+                createdAt: new Date().toISOString(),
+            });
+            setNewSchedule({ time: '', valveId: 'valve1' }); // Reset form
+            setError(null);
+        } catch (err) {
+            console.error("Error adding schedule:", err);
+            setError("Erro ao adicionar agendamento.");
+        }
+    };
+
+    const handleDeleteSchedule = async (scheduleId) => {
+        if (!db) return;
+        const scheduleDocRef = doc(db, getSchedulesPath(), scheduleId);
+        try {
+            await deleteDoc(scheduleDocRef);
+        } catch (err) {
+            console.error("Error deleting schedule:", err);
         }
     };
 
@@ -211,7 +225,6 @@ function App() {
         return (
             <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
                 <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-green-500"></div>
-                <p className="ml-4 text-xl">Carregando Horta Inteligente...</p>
             </div>
         );
     }
@@ -223,99 +236,102 @@ function App() {
                     <Leaf size={48} className="mr-3 text-green-500" />
                     Painel da Horta Inteligente
                 </h1>
-                {userId && <p className="text-xs text-gray-400 mt-1">Conectado como: {userId.substring(0,10)}...</p>}
             </header>
 
             {error && (
-                <div className="bg-red-700 border border-red-900 text-white px-4 py-3 rounded-lg relative mb-6 shadow-lg" role="alert">
-                    <strong className="font-bold">Erro: </strong>
-                    <span className="block sm:inline">{error}</span>
+                <div className="bg-red-700 text-white px-4 py-3 rounded-lg relative mb-6 shadow-lg">
+                    <span>{error}</span>
                 </div>
             )}
             
-            {showMockDataInfo && (
-                 <div className="bg-blue-600 border border-blue-800 text-white px-4 py-3 rounded-lg relative mb-6 shadow-lg">
-                    <strong className="font-bold">Informação:</strong>
-                    <p className="text-sm">Esta interface está usando dados simulados. Em um sistema real, um ESP32 enviaria dados dos sensores e receberia comandos para as válvulas.</p>
-                    <p className="text-sm mt-1">As leituras dos sensores são atualizadas automaticamente. Você pode clicar em "Atualizar Dados Mock" para gerar novos valores aleatórios.</p>
-                    <button 
-                        onClick={() => setShowMockDataInfo(false)} 
-                        className="absolute top-0 bottom-0 right-0 px-3 py-2 text-blue-100 hover:text-white text-lg"
-                        aria-label="Fechar informação"
-                    >
-                        &times;
-                    </button>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                 <SensorCard icon={<Droplets className="text-blue-400" />} title="Umidade do Solo" value={`${sensorData.soilMoisture || 0}%`} />
                 <SensorCard icon={<Thermometer className="text-red-400" />} title="Temperatura" value={`${sensorData.temperature || 0}°C`} />
                 <SensorCard icon={<Cloud className="text-sky-400" />} title="Umidade do Ar" value={`${sensorData.humidity || 0}%`} />
-                <SensorCard icon={<Zap className="text-yellow-400" />} title="Nível de Luz" value={`${sensorData.lightLevel || 0} lux`} />
             </div>
              <button 
                 onClick={updateMockSensorData}
-                className="mb-8 w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition duration-150 ease-in-out flex items-center justify-center"
+                className="mb-8 w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition"
             >
-                <Leaf size={20} className="mr-2"/> Atualizar Dados Mock dos Sensores
+                Atualizar Dados Mock
             </button>
 
-            <section className="bg-gray-700 p-6 rounded-xl shadow-2xl">
-                <h2 className="text-2xl sm:text-3xl font-semibold mb-6 text-green-300">Controle das Válvulas Solenoides</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <ValveControl
-                        valveId="valve1"
-                        name="Válvula Irrigação 1"
-                        isOn={valveStates.valve1 || false}
-                        onToggle={handleValveToggle}
-                    />
-                    <ValveControl
-                        valveId="valve2"
-                        name="Válvula Irrigação 2"
-                        isOn={valveStates.valve2 || false}
-                        onToggle={handleValveToggle}
-                    />
-                </div>
-            </section>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <section className="bg-gray-700 p-6 rounded-xl shadow-2xl">
+                    <h2 className="text-2xl font-semibold mb-6 text-green-300">Controle Manual</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <ValveControl valveId="valve1" name="Válvula 1" isOn={valveStates.valve1} onToggle={handleValveToggle} />
+                        <ValveControl valveId="valve2" name="Válvula 2" isOn={valveStates.valve2} onToggle={handleValveToggle} />
+                    </div>
+                </section>
 
+                <section className="bg-gray-700 p-6 rounded-xl shadow-2xl">
+                    <h2 className="text-2xl font-semibold mb-6 text-green-300">Agendamento de Irrigação</h2>
+                    <form onSubmit={handleAddSchedule} className="flex flex-col sm:flex-row gap-4 mb-6">
+                        <input 
+                            type="time" 
+                            value={newSchedule.time}
+                            onChange={(e) => setNewSchedule({...newSchedule, time: e.target.value})}
+                            className="bg-gray-600 text-white p-3 rounded-lg border-2 border-gray-500 focus:border-green-500 focus:outline-none flex-grow"
+                        />
+                        <select 
+                            value={newSchedule.valveId}
+                            onChange={(e) => setNewSchedule({...newSchedule, valveId: e.target.value})}
+                            className="bg-gray-600 text-white p-3 rounded-lg border-2 border-gray-500 focus:border-green-500 focus:outline-none"
+                        >
+                            <option value="valve1">Válvula 1</option>
+                            <option value="valve2">Válvula 2</option>
+                        </select>
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold p-3 rounded-lg flex items-center justify-center gap-2">
+                            <PlusCircle size={20} /> Adicionar
+                        </button>
+                    </form>
+                    <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
+                        {schedules.length > 0 ? schedules.map(schedule => (
+                            <div key={schedule.id} className="bg-gray-600 p-3 rounded-lg flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <Clock size={20} className="text-green-400" />
+                                    <span className="font-mono text-lg">{schedule.time}</span>
+                                    <span className="text-gray-300">{schedule.valveId === 'valve1' ? 'Válvula 1' : 'Válvula 2'}</span>
+                                </div>
+                                <button onClick={() => handleDeleteSchedule(schedule.id)} className="text-red-400 hover:text-red-300">
+                                    <Trash2 size={20} />
+                                </button>
+                            </div>
+                        )) : <p className="text-gray-400 text-center">Nenhum horário agendado.</p>}
+                    </div>
+                </section>
+            </div>
+            
             <footer className="mt-12 text-center text-gray-400 text-sm">
-                <p>&copy; {new Date().getFullYear()} Horta Inteligente. Controle e Monitoramento.</p>
-                <p className="mt-1">Para integrar com um ESP32: programe o ESP32 para ler sensores e enviar dados para o Firestore no caminho `{getSensorsPath()}`. Para controle, o ESP32 deve ler o estado das válvulas de `{getValvesPath()}` e acioná-las.</p>
+                <p>O ESP32 deve ser programado para ler os horários de `{getSchedulesPath()}` e acionar as válvulas nos momentos definidos.</p>
             </footer>
         </div>
     );
 }
 
-// SensorCard Component
 const SensorCard = ({ icon, title, value }) => (
-    <div className="bg-gray-700 p-5 rounded-xl shadow-lg hover:shadow-green-500/30 transition-shadow duration-300 flex flex-col items-center">
+    <div className="bg-gray-700 p-5 rounded-xl shadow-lg hover:shadow-green-500/30 transition-shadow flex flex-col items-center">
         <div className="text-4xl mb-3">{icon}</div>
         <h3 className="text-lg font-semibold text-gray-200 mb-1 text-center">{title}</h3>
         <p className="text-3xl font-bold text-green-400">{value}</p>
     </div>
 );
 
-// ValveControl Component
 const ValveControl = ({ valveId, name, isOn, onToggle }) => {
     const Icon = isOn ? Power : CircleSlash;
     const bgColor = isOn ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700';
-    const buttonText = isOn ? 'Desligar' : 'Ligar';
-
     return (
         <div className="bg-gray-600 p-6 rounded-lg shadow-md flex flex-col items-center justify-between">
             <h4 className="text-xl font-medium text-gray-100 mb-3 text-center">{name}</h4>
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${isOn ? 'bg-green-500' : 'bg-gray-500'}`}>
-                <Icon size={32} className="text-white" />
-            </div>
             <p className={`text-lg font-semibold mb-4 ${isOn ? 'text-green-400' : 'text-red-400'}`}>
                 {isOn ? 'ATIVA' : 'INATIVA'}
             </p>            
             <button
                 onClick={() => onToggle(valveId)}
-                className={`w-full font-semibold py-3 px-6 rounded-lg shadow-md transition duration-150 ease-in-out text-white ${bgColor} flex items-center justify-center`}
+                className={`w-full font-semibold py-3 px-6 rounded-lg shadow-md transition text-white ${bgColor} flex items-center justify-center`}
             >
-                <Icon size={20} className="mr-2"/> {buttonText}
+                <Icon size={20} className="mr-2"/> {isOn ? 'Desligar' : 'Ligar'}
             </button>
         </div>
     );
