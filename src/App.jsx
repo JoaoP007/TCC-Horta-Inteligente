@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { db, ensureAnonAuth } from './lib/firebase'
+import { db, ensureAnonAuth } from './lib/firebase.js/'
 import {
   doc, getDoc, setDoc, updateDoc, onSnapshot,
   collection, addDoc, deleteDoc, serverTimestamp, query, orderBy
