@@ -115,6 +115,7 @@ export default function App() {
 
   if (!ready) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-14 w-14 border-t-4 border-green-500"></div></div>
 
+  
   return (
     <div className="min-h-screen p-4 sm:p-8 bg-gray-800 text-white">
       <header className="mb-8 text-center">
