@@ -25,12 +25,15 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui
 
 .container{
   width:100%;
-  max-width:980px;           /* largura limite */
+  max-width:800px;           /* largura limite */
 }
 
 .header{
-  display:flex;align-items:center;gap:12px;
+  display:flex;
+  align-items:center;
+  gap:12px;
   margin-bottom:20px;
+  justify-content: center;
 }
 .header h1{margin:0;font-size:28px;color:#7ef59a}
 .leaf{font-size:28px}
