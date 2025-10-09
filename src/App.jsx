@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
+import HistoryChart from './HistoryChart';
 import { db } from './lib/firebase.js'; // Removi ensureAnonAuth, pois não é usado aqui
 import {
   collection,
@@ -157,6 +158,11 @@ export default function App() {
           <StatCard icon={<span>🌡️</span>} title="Temperatura" value={`${temp}°C`} />
         </section>
 
+ {/* --- Painel de historico --- */}
+        <section className="panel panel-full-width">
+           <HistoryChart />
+        </section>
+        
         <section className="grid">
           {/* --- NOVO: Painel do Modo Automático --- */}
           <div className="panel">
