@@ -196,3 +196,9 @@ input[type="range"]:disabled {
 input[type="range"]:disabled::-webkit-slider-thumb {
     background: #34495e;
 }
+
+.chart-container {
+  position: relative;
+  height: 350px; /* ou a altura que preferir */
+  padding: 10px;
+}
