@@ -82,11 +82,14 @@ export default function App() {
     if (!hora) return alert("Escolha um horário (HH:MM).");
     const [HH, MM] = hora.split(":").map((s) => Number(s));
     if (Number.isNaN(HH) || Number.isNaN(MM)) return alert("Horário inválido.");
-    if (duracao < 1) return alert("Duração mínima é 1 minuto.");
+    
+    // Converte a duração para número para validação
+    const duracaoNumerica = Number(duracao);
+    if (duracaoNumerica < 1) return alert("Duração mínima é 1 minuto.");
 
     await addDoc(collection(db, "agendamentos"), {
       time: `${String(HH).padStart(2, "0")}:${String(MM).padStart(2, "0")}`,
-      minutes: duracao,
+      minutes: duracaoNumerica, // <-- AQUI ESTÁ A CORREÇÃO
       target: "aspersor1",
       enabled: true,
       createdAt: serverTimestamp(),
