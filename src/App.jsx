@@ -1,9 +1,6 @@
-// App.jsx ATUALIZADO com Modo Automático
-
 import React, { useEffect, useMemo, useState } from "react";
 import "./App.css";
-import HistoryChart from './HistoryChart';
-import { db } from './lib/firebase.js'; // Removi ensureAnonAuth, pois não é usado aqui
+import { db } from './lib/firebase.js';
 import {
   collection,
   addDoc,
@@ -15,6 +12,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
+import HistoryChart from './HistoryChart'; // Importa o componente do gráfico
 
 /** UI helpers */
 const StatCard = ({ icon, title, value }) => (
@@ -36,9 +34,9 @@ export default function App() {
   // Agendamentos
   const [agenda, setAgenda] = useState([]);
 
-  // --- NOVO: Estados para o Modo Automático ---
+  // Estados para o Modo Automático
   const [isAutoMode, setIsAutoMode] = useState(false);
-  const [minHumidity, setMinHumidity] = useState(60); // Valor padrão de 60%
+  const [minHumidity, setMinHumidity] = useState(35);
 
   // Inputs de agendamento
   const [hora, setHora] = useState("");
@@ -62,12 +60,12 @@ export default function App() {
       }
     });
 
-    // --- NOVO: Listener para as Configurações do Modo Automático ---
+    // Listener para as Configurações do Modo Automático
     const refConfig = doc(db, "configuracao", "geral");
     const unsubConfig = onSnapshot(refConfig, (snap) => {
       const data = snap.data();
       if (data) {
-        setIsAutoMode(data.autoModeEnabled === true); // Garante que seja booleano
+        setIsAutoMode(data.autoModeEnabled === true);
         if (typeof data.minHumidity === 'number') {
             setMinHumidity(data.minHumidity);
         }
@@ -77,16 +75,15 @@ export default function App() {
     return () => {
       unsubAgenda();
       unsubStatus();
-      unsubConfig(); // Limpa o novo listener
+      unsubConfig();
     };
   }, []);
 
-
   /** --- Ações --- */
   const toggleAspersor = async () => {
-    if (isAutoMode) return; // Não permite controle manual se o modo auto estiver ativo
+    if (isAutoMode) return;
     const desired = !aspersorLigado;
-    setAspersorLigado(desired); // Atualização otimista
+    setAspersorLigado(desired);
     await setDoc(
       doc(db, "comandos", "aspersor1"),
       { desired, updatedAt: serverTimestamp() },
@@ -95,7 +92,6 @@ export default function App() {
   };
 
   const addAgendamento = async () => {
-    // ... (função addAgendamento continua a mesma)
     if (!hora) return alert("Escolha um horário (HH:MM).");
     const [HH, MM] = hora.split(":").map((s) => Number(s));
     if (Number.isNaN(HH) || Number.isNaN(MM)) return alert("Horário inválido.");
@@ -119,7 +115,6 @@ export default function App() {
     await deleteDoc(doc(db, "agendamentos", id));
   };
   
-  // --- NOVO: Função para atualizar as configurações do Modo Automático no Firebase ---
   const updateAutoModeConfig = async (newConfig) => {
     const configRef = doc(db, "configuracao", "geral");
     await setDoc(configRef, { ...newConfig, updatedAt: serverTimestamp() }, { merge: true });
@@ -137,7 +132,6 @@ export default function App() {
     updateAutoModeConfig({ minHumidity: novoValor });
   };
 
-
   /** --- UI helpers --- */
   const statusClasse = useMemo(
     () => (aspersorLigado ? "status ativo" : "status inativo"),
@@ -148,23 +142,27 @@ export default function App() {
   return (
     <div className="page">
       <main className="container">
+        
+        {/* CABEÇALHO */}
         <header className="header">
           <span className="leaf">🌿</span>
           <h1>Painel da Horta Inteligente</h1>
         </header>
 
+        {/* CARDS DE STATUS */}
         <section className="stats">
           <StatCard icon={<span>💧</span>} title="Umidade do Solo" value={`${soil}%`} />
           <StatCard icon={<span>🌡️</span>} title="Temperatura" value={`${temp}°C`} />
         </section>
 
- {/* --- Painel de historico --- */}
-        <section className="panel panel-full-width">
-           <HistoryChart />
+        {/* GRÁFICO HISTÓRICO */}
+        <section className="panel">
+          <HistoryChart />
         </section>
-        
+
+        {/* GRID PARA OS CONTROLES LADO A LADO */}
         <section className="grid">
-          {/* --- NOVO: Painel do Modo Automático --- */}
+          {/* PAINEL MODO AUTOMÁTICO */}
           <div className="panel">
             <h2>Modo Automático</h2>
             <div className="automode-control">
@@ -184,12 +182,12 @@ export default function App() {
                 max="100"
                 value={minHumidity}
                 onChange={handleHumidityChange}
-                disabled={!isAutoMode} // Desabilita o slider se o modo auto estiver desligado
+                disabled={!isAutoMode}
               />
             </div>
           </div>
-        
-          {/* Painel de Controle Manual */}
+          
+          {/* PAINEL CONTROLE MANUAL */}
           <div className="panel">
             <h2>Controle Manual</h2>
             <div className="control-grid one">
@@ -199,7 +197,7 @@ export default function App() {
                 <button
                   className={`btn ${aspersorLigado ? "btn-off" : "btn-on"}`}
                   onClick={toggleAspersor}
-                  disabled={isAutoMode} // Desabilita o botão se o modo auto estiver ativo
+                  disabled={isAutoMode}
                 >
                   {aspersorLigado ? "Desligar" : "Ligar"}
                 </button>
@@ -208,11 +206,10 @@ export default function App() {
             </div>
           </div>
         </section>
-        
-        {/* O painel de agendamento foi movido para fora da grid para ocupar a largura toda */}
-        <section className="panel panel-full-width">
+
+        {/* PAINEL DE AGENDAMENTO */}
+        <section className="panel">
             <h2>Agendamento de Irrigação</h2>
-            {/* ... (código do agendamento continua o mesmo) ... */}
             <div className="agendar">
                  <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} className="time-input"/>
                  <select className="select" disabled value="aspersor1"> <option value="aspersor1">Aspersor 1</option> </select>
@@ -233,7 +230,7 @@ export default function App() {
                 </ul>
             )}
         </section>
-
+        
       </main>
     </div>
   );
