@@ -20,13 +20,13 @@ html, body {
   font-family: Inter, system-ui, Arial;
 }
 
-/* Garante que a página esteja centralizada */
 .page {
+  display: flex;
+  justify-content: center; /* Esta é a linha mais importante: centraliza o conteúdo horizontalmente */
+  align-items: flex-start; /* Alinha o conteúdo no topo */
+  padding: 32px 16px;     /* Adiciona um espaçamento das bordas da tela */
   width: 100%;
   min-height: 100vh;
-  display: flex;
-  justify-content: center; /* Centraliza o .container horizontalmente */
-  padding: 32px 16px;
 }
 
 /* Container principal que organiza tudo em uma coluna */
