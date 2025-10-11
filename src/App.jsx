@@ -32,12 +32,8 @@ export default function App() {
   const [hora, setHora] = useState("");
   const [duracao, setDuracao] = useState(1);
 
-  // ==============================
-  // Inicialização e listeners Firestore
-  // ==============================
   useEffect(() => {
     const setupListeners = () => {
-      // Listener da Agenda
       const q = query(
         collection(db, "agendamentos"),
         orderBy("time", "asc"),
@@ -47,14 +43,12 @@ export default function App() {
         setAgenda(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
       );
 
-      // Listener do Status do Aspersor
       const refStatus = doc(db, "status", "aspersor1");
       const unsubStatus = onSnapshot(refStatus, (snap) => {
         const data = snap.data();
         if (data && typeof data.isOn === "boolean") setAspersorLigado(data.isOn);
       });
 
-      // Listener do modo automático
       const refConfig = doc(db, "configuracao", "geral");
       const unsubConfig = onSnapshot(refConfig, (snap) => {
         const data = snap.data();
@@ -71,18 +65,12 @@ export default function App() {
       };
     };
 
-    // Garante login anônimo e então liga os listeners
     ensureAnonAuth().then(() => {
       const cleanup = setupListeners();
       return cleanup;
     });
   }, []);
 
-  // ==============================
-  // Funções principais
-  // ==============================
-
-  // Liga/desliga o aspersor (manual)
   const toggleAspersor = async () => {
     if (isAutoMode) return;
     try {
@@ -99,7 +87,6 @@ export default function App() {
     }
   };
 
-  // Adiciona um agendamento
   const addAgendamento = async () => {
     try {
       if (!hora || !/^\d{2}:\d{2}$/.test(hora)) {
@@ -111,8 +98,7 @@ export default function App() {
         return;
       }
       await ensureAnonAuth();
-      const colRef = collection(db, "agendamentos");
-      await addDoc(colRef, {
+      await addDoc(collection(db, "agendamentos"), {
         time: hora,
         minutes: Number(duracao),
         aspersorId: "aspersor1",
@@ -125,7 +111,6 @@ export default function App() {
     }
   };
 
-  // Remove agendamento
   const removerAgendamento = async (id) => {
     try {
       await ensureAnonAuth();
@@ -136,13 +121,11 @@ export default function App() {
     }
   };
 
-  // Atualiza doc de configuração
   const updateAutoModeConfig = async (newConfig) => {
     try {
       await ensureAnonAuth();
-      const refConfig = doc(db, "configuracao", "geral");
       await setDoc(
-        refConfig,
+        doc(db, "configuracao", "geral"),
         { ...newConfig, updatedAt: serverTimestamp() },
         { merge: true }
       );
@@ -152,34 +135,24 @@ export default function App() {
     }
   };
 
-  // Alterna modo automático
   const handleAutoModeToggle = () => {
     const next = !isAutoMode;
     setIsAutoMode(next);
     updateAutoModeConfig({ autoModeEnabled: next });
   };
 
-  // Altera umidade mínima
   const handleHumidityChange = (e) => {
     const v = Number(e.target.value);
     setMinHumidity(v);
-    if (isAutoMode) {
-      updateAutoModeConfig({ minHumidity: v });
-    }
+    if (isAutoMode) updateAutoModeConfig({ minHumidity: v });
   };
 
-  // ==============================
-  // Status dinâmico
-  // ==============================
   const statusClasse = useMemo(
     () => (aspersorLigado ? "status ativo" : "status inativo"),
     [aspersorLigado]
   );
   const statusTexto = aspersorLigado ? "ATIVO" : "INATIVO";
 
-  // ==============================
-  // Renderização
-  // ==============================
   return (
     <div className="page">
       <main className="container">
@@ -188,15 +161,13 @@ export default function App() {
           <h1>Painel da Horta Inteligente</h1>
         </header>
 
+        {/* 1) Cards no topo */}
         <section className="stats">
           <StatCard icon={<span>💧</span>} title="Umidade do Solo" value={`${soil}%`} />
           <StatCard icon={<span>🌡️</span>} title="Temperatura" value={`${temp}°C`} />
         </section>
 
-        <section className="panel">
-          <HistoryChart />
-        </section>
-
+        {/* 2) Controles logo abaixo */}
         <section className="grid">
           <div className="panel">
             <h2>Modo Automático</h2>
@@ -245,6 +216,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* 3) Agendamento */}
         <section className="panel">
           <h2>Agendamento de Irrigação</h2>
           <div className="agendar">
@@ -263,9 +235,7 @@ export default function App() {
                 type="number"
                 min={1}
                 value={duracao}
-                onChange={(e) =>
-                  setDuracao(Math.max(1, Number(e.target.value)))
-                }
+                onChange={(e) => setDuracao(Math.max(1, Number(e.target.value)))}
                 className="number-input"
               />
             </div>
@@ -293,6 +263,14 @@ export default function App() {
               ))}
             </ul>
           )}
+        </section>
+
+        {/* 4) Gráfico por último */}
+        <section className="panel">
+          <h2>Histórico das Últimas 24 Horas</h2>
+          <div className="chart-container">
+            <HistoryChart />
+          </div>
         </section>
       </main>
     </div>
