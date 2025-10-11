@@ -289,3 +289,31 @@ input[type="range"]:disabled::-webkit-slider-thumb {
     align-items: center;
   }
 }
+/* garante que o wrapper ocupe toda a tela */
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+/* a .page já está ok; manteremos o flex para centralizar */
+.page {
+  display: flex;
+  justify-content: center;   /* centraliza horizontalmente */
+  align-items: flex-start;    /* topo */
+  padding: 32px 16px;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* TRUQUE: centraliza o conteúdo limitado ao max-width */
+.container {
+  width: 100%;
+  max-width: 900px;          /* ajuste se quiser mais/menos largo (ex.: 800–1100px) */
+  margin: 0 auto;            /* <-- força centralização */
+}
+
+/* só para garantir que cada painel ocupe a largura do container */
+.panel, .card {
+  width: 100%;
+}
+
