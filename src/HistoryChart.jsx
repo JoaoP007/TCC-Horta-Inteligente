@@ -1,110 +1,166 @@
-import React, { useState, useEffect } from 'react';
-import { db } from './lib/firebase.js';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { Line } from 'react-chartjs-2';
+// src/HistoryChart.jsx
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend
+} from "recharts";
+import { db, ensureAnonAuth } from "./lib/firebase";
+import {
+  collection, onSnapshot, orderBy, query, where, Timestamp,
+} from "firebase/firestore";
 
-// Registra os componentes necessários do Chart.js
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend
-);
+function formatTime(ts) {
+  const d = ts instanceof Date ? ts : ts?.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function HistoryChart() {
-  const [chartData, setChartData] = useState({
-    labels: [],
-    datasets: [],
-  });
+  const [rows, setRows] = useState([]);
+  const [showSoil, setShowSoil] = useState(true);
+  const [showTemp, setShowTemp] = useState(true);
 
   useEffect(() => {
-    // Busca os últimos 48 registros (24 horas, se 1 registro a cada 30 min)
+    const now = new Date();
+    const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // últimas 24h
+
     const q = query(
-      collection(db, 'historico'),
-      orderBy('timestamp', 'desc'),
-      limit(48)
+      collection(db, "historico"),
+      where("createdAt", ">=", Timestamp.fromDate(start)),
+      orderBy("createdAt", "asc")
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (snapshot.empty) {
-        console.log('Nenhum dado histórico encontrado.');
-        return;
-      }
-
-      // Os dados vêm em ordem decrescente, então invertemos para o gráfico
-      const historicalData = snapshot.docs.reverse().map((doc) => doc.data());
-
-      setChartData({
-        labels: historicalData.map((data) =>
-          // Formata o timestamp para uma hora legível (ex: "14:30")
-          new Date(data.timestamp?.toDate()).toLocaleTimeString('pt-BR', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        ),
-        datasets: [
-          {
-            label: 'Umidade do Solo (%)',
-            data: historicalData.map((data) => data.soilMoisture),
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-            yAxisID: 'y',
-            fill: true,
-          },
-          {
-            label: 'Temperatura (°C)',
-            data: historicalData.map((data) => data.temperature),
-            borderColor: '#e57373',
-            backgroundColor: 'rgba(229, 115, 115, 0.2)',
-            yAxisID: 'y1',
-          },
-        ],
+    let unsub = () => {};
+    ensureAnonAuth().then(() => {
+      unsub = onSnapshot(q, (snap) => {
+        const data = snap.docs.map((d) => d.data());
+        const parsed = data.map((it) => {
+          const soilRaw = it.soil ?? it.umidade ?? 0;
+          const soilPct = soilRaw <= 1 ? Math.round(soilRaw * 100) : Math.round(soilRaw);
+          const temp = typeof it.temp === "number" ? it.temp : (typeof it.temperatura === "number" ? it.temperatura : null);
+          const t = it.createdAt;
+          return { x: formatTime(t), soilPct, temp };
+        });
+        setRows(parsed);
       });
     });
 
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { position: 'top' },
-      title: { display: true, text: 'Histórico das Últimas 24 Horas' },
-    },
-    scales: {
-      y: {
-        type: 'linear',
-        display: true,
-        position: 'left',
-        title: { display: true, text: 'Umidade (%)' }
-      },
-      y1: {
-        type: 'linear',
-        display: true,
-        position: 'right',
-        title: { display: true, text: 'Temperatura (°C)' },
-        grid: { drawOnChartArea: false }, // Evita linhas de grade duplicadas
-      },
-    },
-  };
+  // fallback quando não há dados
+  const data = useMemo(() => {
+    if (rows.length) return rows;
+    const now = Date.now();
+    return Array.from({ length: 12 }, (_, i) => {
+      const t = new Date(now - (11 - i) * 60 * 60 * 1000);
+      return { x: formatTime(t), soilPct: 40 + (i % 5) * 4, temp: 22 + (i % 4) };
+    });
+  }, [rows]);
+
+  // Cores do tema (usando CSS variables)
+  const rootStyle = getComputedStyle(document.documentElement);
+  const colorText = rootStyle.getPropertyValue("--text")?.trim() || "#e6f0f7";
+  const colorMuted = rootStyle.getPropertyValue("--muted")?.trim() || "#9bb0bf";
+  const colorGreen = rootStyle.getPropertyValue("--green")?.trim() || "#2ecc71";
+  const colorBlue = rootStyle.getPropertyValue("--blue")?.trim() || "#3b82f6";
+
+  const handleLegendClick = useCallback((e) => {
+    if (e?.dataKey === "soilPct") setShowSoil((v) => !v);
+    if (e?.dataKey === "temp") setShowTemp((v) => !v);
+  }, []);
 
   return (
-    <div className="chart-container">
-      <Line data={chartData} options={options} />
-    </div>
+    <ResponsiveContainer width="100%" height={360}>
+      <LineChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
+        <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+        <XAxis
+          dataKey="x"
+          tick={{ fill: colorMuted, fontSize: 13 }}
+          tickMargin={8}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+        />
+        {/* Y esquerda: Umidade (%) */}
+        <YAxis
+          yAxisId="left"
+          domain={[0, 100]}
+          tick={{ fill: colorMuted, fontSize: 13 }}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          label={{
+            value: "Umidade (%)",
+            angle: -90,
+            position: "insideLeft",
+            fill: colorMuted,
+            fontSize: 14,
+            offset: 10,
+          }}
+        />
+        {/* Y direita: Temperatura (°C) */}
+        <YAxis
+          yAxisId="right"
+          orientation="right"
+          tick={{ fill: colorMuted, fontSize: 13 }}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          label={{
+            value: "Temperatura (°C)",
+            angle: 90,
+            position: "insideRight",
+            fill: colorMuted,
+            fontSize: 14,
+            offset: 10,
+          }}
+        />
+        <Tooltip
+          formatter={(value, name) => {
+            if (name === "soilPct") return [`${value}%`, "Umidade do Solo"];
+            if (name === "temp") return [`${value}°C`, "Temperatura"];
+            return [value, name];
+          }}
+          labelFormatter={(label) => `Horário: ${label}`}
+          contentStyle={{
+            background: "#1f2b36",
+            border: "1px solid #334454",
+            borderRadius: 10,
+            color: colorText,
+            fontSize: 14,
+          }}
+        />
+        <Legend
+          verticalAlign="top"
+          height={28}
+          iconType="line"
+          onClick={handleLegendClick}
+          wrapperStyle={{ color: colorMuted, fontSize: 13 }}
+        />
+        {/* Série: Umidade */}
+        {showSoil && (
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="soilPct"
+            name="Umidade do Solo"
+            stroke={colorGreen}
+            strokeWidth={2.5}
+            dot={false}
+            activeDot={{ r: 4 }}
+          />
+        )}
+        {/* Série: Temperatura */}
+        {showTemp && (
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="temp"
+            name="Temperatura"
+            stroke={colorBlue}
+            strokeWidth={2.5}
+            dot={false}
+            activeDot={{ r: 4 }}
+          />
+        )}
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
