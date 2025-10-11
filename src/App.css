@@ -37,8 +37,8 @@ html,body,#root{ height:100%; width:100%; }
 
 /* Cabeçalho */
 .header{ display:flex; align-items:center; justify-content:center; gap:12px; }
-.header h1{ margin:0; font-size:32px; color:#7ef59a; text-align:center; letter-spacing:.3px; }
-.leaf{ font-size:28px; }
+.header h1{ margin:0; font-size:38px; color:#7ef59a; text-align:center; letter-spacing:.3px; }
+.leaf{ font-size:30px; }
 
 /* ---------- Cartões e Painéis com sombra + hover ---------- */
 .stats{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
