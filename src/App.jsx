@@ -25,15 +25,23 @@ const StatCard = ({ icon, title, value }) => (
 export default function App() {
   const [soil, setSoil] = useState(13);
   const [temp, setTemp] = useState(24);
+
   const [aspersorLigado, setAspersorLigado] = useState(false);
   const [agenda, setAgenda] = useState([]);
+
   const [isAutoMode, setIsAutoMode] = useState(false);
   const [minHumidity, setMinHumidity] = useState(35);
+  const [maxHumidity, setMaxHumidity] = useState(60); // novo: alvo/máxima
+
   const [hora, setHora] = useState("");
   const [duracao, setDuracao] = useState(1);
 
+  // -------------------------------
+  // Listeners Firestore
+  // -------------------------------
   useEffect(() => {
     const setupListeners = () => {
+      // Agenda
       const q = query(
         collection(db, "agendamentos"),
         orderBy("time", "asc"),
@@ -43,18 +51,37 @@ export default function App() {
         setAgenda(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
       );
 
+      // Status aspersor
       const refStatus = doc(db, "status", "aspersor1");
       const unsubStatus = onSnapshot(refStatus, (snap) => {
         const data = snap.data();
         if (data && typeof data.isOn === "boolean") setAspersorLigado(data.isOn);
       });
 
+      // Config geral (auto mode + sliders)
       const refConfig = doc(db, "configuracao", "geral");
       const unsubConfig = onSnapshot(refConfig, (snap) => {
         const data = snap.data();
-        if (data) {
-          setIsAutoMode(data.autoModeEnabled === true);
-          if (typeof data.minHumidity === "number") setMinHumidity(data.minHumidity);
+        if (!data) return;
+
+        if (typeof data.autoModeEnabled === "boolean") {
+          setIsAutoMode(data.autoModeEnabled);
+        }
+        if (typeof data.minHumidity === "number") {
+          // garante min < max mesmo ao receber do Firestore
+          const incomingMin = data.minHumidity;
+          setMinHumidity((prev) => {
+            const maxRef = typeof data.maxHumidity === "number" ? data.maxHumidity : maxHumidity;
+            return incomingMin >= maxRef ? Math.max(0, maxRef - 1) : incomingMin;
+          });
+        }
+        if (typeof data.maxHumidity === "number") {
+          // garante max > min mesmo ao receber do Firestore
+          const incomingMax = data.maxHumidity;
+          setMaxHumidity((prev) => {
+            const minRef = typeof data.minHumidity === "number" ? data.minHumidity : minHumidity;
+            return incomingMax <= minRef ? Math.min(100, minRef + 1) : incomingMax;
+          });
         }
       });
 
@@ -69,8 +96,12 @@ export default function App() {
       const cleanup = setupListeners();
       return cleanup;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // -------------------------------
+  // Writes Firestore / Handlers
+  // -------------------------------
   const toggleAspersor = async () => {
     if (isAutoMode) return;
     try {
@@ -141,18 +172,34 @@ export default function App() {
     updateAutoModeConfig({ autoModeEnabled: next });
   };
 
-  const handleHumidityChange = (e) => {
-    const v = Number(e.target.value);
+  // Slider de MÍNIMO: nunca deixa mínimo >= máximo
+  const handleMinHumidityChange = (e) => {
+    let v = Number(e.target.value);
+    if (v >= maxHumidity) v = Math.max(0, maxHumidity - 1);
     setMinHumidity(v);
     if (isAutoMode) updateAutoModeConfig({ minHumidity: v });
   };
 
+  // Slider de MÁXIMO/ALVO: nunca deixa máximo <= mínimo
+  const handleMaxHumidityChange = (e) => {
+    let v = Number(e.target.value);
+    if (v <= minHumidity) v = Math.min(100, minHumidity + 1);
+    setMaxHumidity(v);
+    if (isAutoMode) updateAutoModeConfig({ maxHumidity: v });
+  };
+
+  // -------------------------------
+  // Status dinâmico
+  // -------------------------------
   const statusClasse = useMemo(
     () => (aspersorLigado ? "status ativo" : "status inativo"),
     [aspersorLigado]
   );
   const statusTexto = aspersorLigado ? "ATIVO" : "INATIVO";
 
+  // -------------------------------
+  // Render
+  // -------------------------------
   return (
     <div className="page">
       <main className="container">
@@ -167,10 +214,11 @@ export default function App() {
           <StatCard icon={<span>🌡️</span>} title="Temperatura" value={`${temp}°C`} />
         </section>
 
-        {/* 2) Controles logo abaixo */}
+        {/* 2) Controles */}
         <section className="grid">
           <div className="panel">
             <h2>Modo Automático</h2>
+
             <div className="automode-control">
               <span>Status:</span>
               <button
@@ -180,19 +228,42 @@ export default function App() {
                 {isAutoMode ? "ATIVADO" : "DESATIVADO"}
               </button>
             </div>
+
             <div className="automode-slider">
               <label>
-                Umid. Mínima: <strong>{minHumidity}%</strong>
+                Umid. Mínima (liga): <strong>{minHumidity}%</strong>
               </label>
               <input
                 type="range"
                 min="0"
                 max="100"
                 value={minHumidity}
-                onChange={handleHumidityChange}
+                onChange={handleMinHumidityChange}
                 disabled={!isAutoMode}
               />
             </div>
+
+            <div className="automode-slider">
+              <label>
+                Umid. Máxima/Alvo (desliga): <strong>{maxHumidity}%</strong>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={maxHumidity}
+                onChange={handleMaxHumidityChange}
+                disabled={!isAutoMode}
+              />
+              <small className="disabled-text">
+                A irrigação automática desliga ao atingir essa umidade.
+              </small>
+            </div>
+
+            <small className="disabled-text">
+              Faixa ativa: liga abaixo de <strong>{minHumidity}%</strong> e desliga ao atingir{" "}
+              <strong>{maxHumidity}%</strong>.
+            </small>
           </div>
 
           <div className="panel">
