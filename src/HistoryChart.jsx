@@ -8,23 +8,19 @@ import {
   collection, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 
-function fmtTick(ts) {
-  const d = new Date(ts);
-  return d.toLocaleString("pt-BR", {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/** formata "seg, 13 18:00" (sem segundos) */
+function fmtTick(ms) {
+  const d = new Date(ms);
+  const wd = d.toLocaleDateString([], { weekday: "short" }); // seg., ter., ...
+  const day = d.toLocaleDateString([], { day: "2-digit" });
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${wd.replace(".", "")}, ${day} ${hm}`;
 }
-function fmtTooltip(ts) {
-  const d = new Date(ts);
-  return d.toLocaleString("pt-BR", {
-    weekday: "short",
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function fmtTooltip(ms) {
+  const d = new Date(ms);
+  const date = d.toLocaleDateString([], { weekday: "long", day: "2-digit", month: "short" });
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `${date} • ${hm}`;
 }
 
 export default function HistoryChart() {
@@ -33,7 +29,8 @@ export default function HistoryChart() {
   const [showTemp, setShowTemp] = useState(true);
 
   useEffect(() => {
-    const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // últimas 7d
 
     const q = query(
       collection(db, "historico"),
@@ -44,15 +41,16 @@ export default function HistoryChart() {
     let unsub = () => {};
     ensureAnonAuth().then(() => {
       unsub = onSnapshot(q, (snap) => {
-        const parsed = snap.docs.map((doc) => {
-          const it = doc.data();
+        const data = snap.docs.map((d) => d.data());
+        const parsed = data.map((it) => {
+          const ts = it.createdAt?.toDate ? it.createdAt.toDate() : new Date(it.createdAt);
+          const ms = ts.getTime();
           const soilRaw = it.soil ?? it.umidade ?? 0;
           const soilPct = soilRaw <= 1 ? Math.round(soilRaw * 100) : Math.round(soilRaw);
           const temp = typeof it.temp === "number"
             ? it.temp
             : (typeof it.temperatura === "number" ? it.temperatura : null);
-          const t = it.createdAt?.toDate ? it.createdAt.toDate() : new Date(it.createdAt);
-          return { ts: t.getTime(), soilPct, temp };
+          return { ts: ms, soilPct, temp };
         });
         setRows(parsed);
       });
@@ -60,125 +58,113 @@ export default function HistoryChart() {
     return () => unsub();
   }, []);
 
+  // fallback de demonstração
   const data = useMemo(() => {
     if (rows.length) return rows;
-    // fallback de 7 dias (caso não haja dados)
     const now = Date.now();
-    return Array.from({ length: 7 * 6 }, (_, i) => {
-      const ts = now - (7 * 24 * 60 - i * 60) * 60 * 1000;
-      return { ts, soilPct: 40 + (i % 5) * 3, temp: 22 + (i % 4) };
+    // 7 dias com ponto a cada 6h
+    return Array.from({ length: 28 }, (_, i) => {
+      const ms = now - (27 - i) * 6 * 60 * 60 * 1000;
+      return { ts: ms, soilPct: 45 + (i % 5) * 5, temp: 22 + (i % 4) };
     });
   }, [rows]);
 
+  // tema
   const css = getComputedStyle(document.documentElement);
-  const colorText  = css.getPropertyValue("--text")?.trim()  || "#e6f0f7";
-  const colorMuted = css.getPropertyValue("--muted")?.trim() || "#9bb0bf";
-  const colorGreen = css.getPropertyValue("--green")?.trim() || "#22c55e";
-  const colorBlue  = css.getPropertyValue("--blue")?.trim()  || "#60a5fa";
+  const cText  = css.getPropertyValue("--text")?.trim()  || "#e6f0f7";
+  const cMuted = css.getPropertyValue("--muted")?.trim() || "#9bb0bf";
+  const cGreen = css.getPropertyValue("--green")?.trim() || "#2ecc71";
+  const cBlue  = css.getPropertyValue("--blue")?.trim()  || "#3b82f6";
 
-  const handleLegendClick = useCallback((e) => {
-    if (e?.dataKey === "soilPct") setShowSoil((v) => !v);
-    if (e?.dataKey === "temp") setShowTemp((v) => !v);
+  const onLegendClick = useCallback((e) => {
+    if (e?.dataKey === "soilPct") setShowSoil(v => !v);
+    if (e?.dataKey === "temp") setShowTemp(v => !v);
   }, []);
 
   return (
-    <div className="panel">
-      <h2>Histórico dos Últimos 7 Dias</h2>
-      <div className="chart-container">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 12, right: 24, left: 12, bottom: 16 }}>
-            <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
-            <XAxis
-              dataKey="ts"
-              type="number"
-              domain={["dataMin", "dataMax"]}
-              tickFormatter={fmtTick}
-              tick={{ fill: colorMuted, fontSize: 14 }}
-              tickMargin={10}
-              interval="preserveStartEnd"
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              minTickGap={28}
-            />
-            <YAxis
-              yAxisId="left"
-              domain={[0, 100]}
-              tick={{ fill: colorMuted, fontSize: 14 }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              label={{
-                value: "Umidade (%)",
-                angle: -90,
-                position: "insideLeft",
-                fill: colorMuted,
-                fontSize: 14,
-                offset: 10
-              }}
-            />
-            <YAxis
-              yAxisId="right"
-              orientation="right"
-              tick={{ fill: colorMuted, fontSize: 14 }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
-              label={{
-                value: "Temperatura (°C)",
-                angle: 90,
-                position: "insideRight",
-                fill: colorMuted,
-                fontSize: 14,
-                offset: 10
-              }}
-            />
-            <Tooltip
-              formatter={(value, name) => {
-                if (name === "soilPct") return [`${value}%`, "Umidade do Solo"];
-                if (name === "temp") return [`${value}°C`, "Temperatura"];
-                return [value, name];
-              }}
-              labelFormatter={(ts) => fmtTooltip(ts)}
-              contentStyle={{
-                background: "#1f2b36",
-                border: "1px solid #334454",
-                borderRadius: 10,
-                color: colorText,
-                fontSize: 15
-              }}
-            />
-            <Legend
-              verticalAlign="top"
-              height={28}
-              iconType="line"
-              onClick={handleLegendClick}
-              wrapperStyle={{ color: colorMuted, fontSize: 14 }}
-            />
-            {showSoil && (
-              <Line
-                yAxisId="left"
-                type="monotone"
-                dataKey="soilPct"
-                name="Umidade do Solo"
-                stroke={colorGreen}
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
-            )}
-            {showTemp && (
-              <Line
-                yAxisId="right"
-                type="monotone"
-                dataKey="temp"
-                name="Temperatura"
-                stroke={colorBlue}
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 5 }}
-              />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <ResponsiveContainer width="100%" height={420}>
+      <LineChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 12 }}>
+        <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+        <XAxis
+          dataKey="ts"
+          tick={{ fill: cMuted, fontSize: 14 }}
+          tickMargin={10}
+          interval="preserveStartEnd"
+          tickFormatter={fmtTick}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+        />
+        <YAxis
+          yAxisId="left"
+          domain={[0, 100]}
+          tick={{ fill: cMuted, fontSize: 14 }}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          label={{
+            value: "Umidade (%)",
+            angle: -90, position: "insideLeft",
+            fill: cMuted, fontSize: 15, offset: 10
+          }}
+        />
+        <YAxis
+          yAxisId="right"
+          orientation="right"
+          tick={{ fill: cMuted, fontSize: 14 }}
+          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
+          label={{
+            value: "Temperatura (°C)",
+            angle: 90, position: "insideRight",
+            fill: cMuted, fontSize: 15, offset: 10
+          }}
+        />
+        <Tooltip
+          labelFormatter={(v) => fmtTooltip(v)}
+          formatter={(value, name) => {
+            if (name === "soilPct") return [`${value}%`, "Umidade do Solo"];
+            if (name === "temp") return [`${value}°C`, "Temperatura"];
+            return [value, name];
+          }}
+          contentStyle={{
+            background: "#1f2b36",
+            border: "1px solid #334454",
+            borderRadius: 12,
+            color: cText,
+            fontSize: 15,
+          }}
+        />
+        <Legend
+          verticalAlign="top"
+          height={30}
+          iconType="line"
+          onClick={onLegendClick}
+          wrapperStyle={{ color: cMuted, fontSize: 14 }}
+        />
+        {showSoil && (
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="soilPct"
+            name="Umidade do Solo"
+            stroke={cGreen}
+            strokeWidth={3}
+            dot={false}
+            activeDot={{ r: 5 }}
+          />
+        )}
+        {showTemp && (
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="temp"
+            name="Temperatura"
+            stroke={cBlue}
+            strokeWidth={3}
+            dot={false}
+            activeDot={{ r: 5 }}
+          />
+        )}
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
