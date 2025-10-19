@@ -176,3 +176,29 @@ input[type="range"]:disabled::-webkit-slider-thumb{ background:#34495e; box-shad
 /* largura dos itens */
 .panel,.card{ width:100%; }
 .container > .panel:last-of-type{ margin-bottom:0; }
+/* --- Corrige a "faixa cinza" sob o último painel (gráfico) --- */
+/* dá mais respiro no fim da página/contêiner pra sombra não ser cortada */
+.page{
+  padding-bottom: 160px;   /* estava ~96px/104px — aumente o respiro */
+  background: var(--bg);   /* garante cor de fundo consistente */
+}
+
+.container{
+  padding-bottom: 140px;   /* mais respiro por segurança */
+  background: transparent; /* não muda, só explícito */
+}
+
+/* garante que o último painel não perca espaço de sombra */
+.container > .panel:last-of-type{
+  margin-bottom: 0;
+}
+
+/* não use scale no container; se tiver em algum lugar, remova */
+.container{ transform: none !important; }
+
+/* o painel não deve “esconder” a sombra interna do conteúdo */
+.panel{ overflow: visible; }
+
+/* altura do gráfico levemente maior (opcional) */
+.chart-container{ height: 460px; }
+
