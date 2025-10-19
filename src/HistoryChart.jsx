@@ -8,21 +8,25 @@ import {
   collection, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 
-/** formata "seg, 13 18:00" (sem segundos) */
+/* ---------- formatação do eixo e tooltip ---------- */
 function fmtTick(ms) {
   const d = new Date(ms);
-  const wd = d.toLocaleDateString([], { weekday: "short" }); // seg., ter., ...
-  const day = d.toLocaleDateString([], { day: "2-digit" });
-  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${wd.replace(".", "")}, ${day} ${hm}`;
+  const dia = String(d.getDate()).padStart(2, "0");
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const hora = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${dia}/${mes} ${hora}:${min}`;
 }
 function fmtTooltip(ms) {
   const d = new Date(ms);
-  const date = d.toLocaleDateString([], { weekday: "long", day: "2-digit", month: "short" });
-  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `${date} • ${hm}`;
+  const dia = String(d.getDate()).padStart(2, "0");
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const hora = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${dia}/${mes} • ${hora}:${min}`;
 }
 
+/* -------------------------------------------------- */
 export default function HistoryChart() {
   const [rows, setRows] = useState([]);
   const [showSoil, setShowSoil] = useState(true);
@@ -30,7 +34,7 @@ export default function HistoryChart() {
 
   useEffect(() => {
     const now = new Date();
-    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // últimas 7d
+    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 dias
 
     const q = query(
       collection(db, "historico"),
@@ -58,18 +62,16 @@ export default function HistoryChart() {
     return () => unsub();
   }, []);
 
-  // fallback de demonstração
   const data = useMemo(() => {
     if (rows.length) return rows;
+    // fallback: dados fictícios
     const now = Date.now();
-    // 7 dias com ponto a cada 6h
     return Array.from({ length: 28 }, (_, i) => {
       const ms = now - (27 - i) * 6 * 60 * 60 * 1000;
       return { ts: ms, soilPct: 45 + (i % 5) * 5, temp: 22 + (i % 4) };
     });
   }, [rows]);
 
-  // tema
   const css = getComputedStyle(document.documentElement);
   const cText  = css.getPropertyValue("--text")?.trim()  || "#e6f0f7";
   const cMuted = css.getPropertyValue("--muted")?.trim() || "#9bb0bf";
