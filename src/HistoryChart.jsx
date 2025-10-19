@@ -9,9 +9,11 @@ import {
   collection, onSnapshot, orderBy, query, where, Timestamp,
 } from "firebase/firestore";
 
-function formatTime(ts) {
-  const d = ts instanceof Date ? ts : ts?.toDate ? ts.toDate() : new Date(ts);
+function fmtHHmm(d) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function fmtDia(d) {
+  return d.toLocaleDateString([], { weekday: "short", day: "2-digit" }); // ex: seg., 08
 }
 
 export default function HistoryChart() {
@@ -21,7 +23,7 @@ export default function HistoryChart() {
 
   useEffect(() => {
     const now = new Date();
-    const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // últimas 24h
+    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 dias
 
     const q = query(
       collection(db, "historico"),
@@ -36,9 +38,15 @@ export default function HistoryChart() {
         const parsed = data.map((it) => {
           const soilRaw = it.soil ?? it.umidade ?? 0;
           const soilPct = soilRaw <= 1 ? Math.round(soilRaw * 100) : Math.round(soilRaw);
-          const temp = typeof it.temp === "number" ? it.temp : (typeof it.temperatura === "number" ? it.temperatura : null);
-          const t = it.createdAt;
-          return { x: formatTime(t), soilPct, temp };
+          const temp = typeof it.temp === "number"
+            ? it.temp
+            : (typeof it.temperatura === "number" ? it.temperatura : null);
+          const t = it.createdAt?.toDate ? it.createdAt.toDate() : new Date(it.createdAt);
+          return {
+            x: `${fmtDia(t)} ${fmtHHmm(t)}`, // eixo X com dia + hora
+            soilPct,
+            temp,
+          };
         });
         setRows(parsed);
       });
@@ -47,22 +55,21 @@ export default function HistoryChart() {
     return () => unsub();
   }, []);
 
-  // fallback quando não há dados
   const data = useMemo(() => {
     if (rows.length) return rows;
+    // fallback de demonstração
     const now = Date.now();
-    return Array.from({ length: 12 }, (_, i) => {
-      const t = new Date(now - (11 - i) * 60 * 60 * 1000);
-      return { x: formatTime(t), soilPct: 40 + (i % 5) * 4, temp: 22 + (i % 4) };
+    return Array.from({ length: 7 * 6 }, (_, i) => {
+      const t = new Date(now - (7 * 24 * 60 - i * 60) * 60 * 1000);
+      return { x: `${fmtDia(t)} ${fmtHHmm(t)}`, soilPct: 40 + (i % 5) * 3, temp: 22 + (i % 4) };
     });
   }, [rows]);
 
-  // Cores do tema (usando CSS variables)
-  const rootStyle = getComputedStyle(document.documentElement);
-  const colorText = rootStyle.getPropertyValue("--text")?.trim() || "#e6f0f7";
-  const colorMuted = rootStyle.getPropertyValue("--muted")?.trim() || "#9bb0bf";
-  const colorGreen = rootStyle.getPropertyValue("--green")?.trim() || "#2ecc71";
-  const colorBlue = rootStyle.getPropertyValue("--blue")?.trim() || "#3b82f6";
+  const css = getComputedStyle(document.documentElement);
+  const colorText  = css.getPropertyValue("--text")?.trim()  || "#e6f0f7";
+  const colorMuted = css.getPropertyValue("--muted")?.trim() || "#9bb0bf";
+  const colorGreen = css.getPropertyValue("--green")?.trim() || "#2ecc71";
+  const colorBlue  = css.getPropertyValue("--blue")?.trim()  || "#3b82f6";
 
   const handleLegendClick = useCallback((e) => {
     if (e?.dataKey === "soilPct") setShowSoil((v) => !v);
@@ -70,47 +77,32 @@ export default function HistoryChart() {
   }, []);
 
   return (
-    <ResponsiveContainer width="100%" height={360}>
+    <ResponsiveContainer width="100%" height={400}>
       <LineChart data={data} margin={{ top: 8, right: 20, left: 8, bottom: 8 }}>
         <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
         <XAxis
           dataKey="x"
-          tick={{ fill: colorMuted, fontSize: 13 }}
+          tick={{ fill: colorMuted, fontSize: 12 }}
           tickMargin={8}
+          interval="preserveStartEnd"
           axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
           tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
         />
-        {/* Y esquerda: Umidade (%) */}
         <YAxis
           yAxisId="left"
           domain={[0, 100]}
-          tick={{ fill: colorMuted, fontSize: 13 }}
+          tick={{ fill: colorMuted, fontSize: 12 }}
           axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
           tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
-          label={{
-            value: "Umidade (%)",
-            angle: -90,
-            position: "insideLeft",
-            fill: colorMuted,
-            fontSize: 14,
-            offset: 10,
-          }}
+          label={{ value: "Umidade (%)", angle: -90, position: "insideLeft", fill: colorMuted, fontSize: 13, offset: 10 }}
         />
-        {/* Y direita: Temperatura (°C) */}
         <YAxis
           yAxisId="right"
           orientation="right"
-          tick={{ fill: colorMuted, fontSize: 13 }}
+          tick={{ fill: colorMuted, fontSize: 12 }}
           axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
           tickLine={{ stroke: "rgba(255,255,255,0.12)" }}
-          label={{
-            value: "Temperatura (°C)",
-            angle: 90,
-            position: "insideRight",
-            fill: colorMuted,
-            fontSize: 14,
-            offset: 10,
-          }}
+          label={{ value: "Temperatura (°C)", angle: 90, position: "insideRight", fill: colorMuted, fontSize: 13, offset: 10 }}
         />
         <Tooltip
           formatter={(value, name) => {
@@ -118,47 +110,16 @@ export default function HistoryChart() {
             if (name === "temp") return [`${value}°C`, "Temperatura"];
             return [value, name];
           }}
-          labelFormatter={(label) => `Horário: ${label}`}
-          contentStyle={{
-            background: "#1f2b36",
-            border: "1px solid #334454",
-            borderRadius: 10,
-            color: colorText,
-            fontSize: 14,
-          }}
+          labelFormatter={(label) => `Hora: ${label}`}
+          contentStyle={{ background: "#1f2b36", border: "1px solid #334454", borderRadius: 10, color: colorText, fontSize: 14 }}
         />
-        <Legend
-          verticalAlign="top"
-          height={28}
-          iconType="line"
-          onClick={handleLegendClick}
-          wrapperStyle={{ color: colorMuted, fontSize: 13 }}
-        />
-        {/* Série: Umidade */}
+        <Legend verticalAlign="top" height={28} iconType="line" onClick={handleLegendClick}
+                wrapperStyle={{ color: colorMuted, fontSize: 13 }} />
         {showSoil && (
-          <Line
-            yAxisId="left"
-            type="monotone"
-            dataKey="soilPct"
-            name="Umidade do Solo"
-            stroke={colorGreen}
-            strokeWidth={2.5}
-            dot={false}
-            activeDot={{ r: 4 }}
-          />
+          <Line yAxisId="left" type="monotone" dataKey="soilPct" name="Umidade do Solo" stroke={colorGreen} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
         )}
-        {/* Série: Temperatura */}
         {showTemp && (
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey="temp"
-            name="Temperatura"
-            stroke={colorBlue}
-            strokeWidth={2.5}
-            dot={false}
-            activeDot={{ r: 4 }}
-          />
+          <Line yAxisId="right" type="monotone" dataKey="temp" name="Temperatura" stroke={colorBlue} strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
         )}
       </LineChart>
     </ResponsiveContainer>
