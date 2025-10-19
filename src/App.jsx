@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import HistoryChart from "./HistoryChart";
 
+// ----- pequenos componentes -----
 const StatCard = ({ icon, title, value }) => (
   <div className="card">
     <div className="card-icon">{icon}</div>
@@ -22,26 +23,40 @@ const StatCard = ({ icon, title, value }) => (
   </div>
 );
 
+// ordem que o JS usa: 0=Dom, 1=Seg, ... 6=Sáb
+const WEEKDAYS = [
+  { v: 1, label: "Seg" },
+  { v: 2, label: "Ter" },
+  { v: 3, label: "Qua" },
+  { v: 4, label: "Qui" },
+  { v: 5, label: "Sex" },
+  { v: 6, label: "Sáb" },
+  { v: 0, label: "Dom" },
+];
+
 export default function App() {
+  // métricas (pode ligar ao Firestore quando tiver)
   const [soil, setSoil] = useState(13);
   const [temp, setTemp] = useState(24);
 
+  // status/controle
   const [aspersorLigado, setAspersorLigado] = useState(false);
-  const [agenda, setAgenda] = useState([]);
-
   const [isAutoMode, setIsAutoMode] = useState(false);
   const [minHumidity, setMinHumidity] = useState(35);
-  const [maxHumidity, setMaxHumidity] = useState(60); // novo: alvo/máxima
+  const [maxHumidity, setMaxHumidity] = useState(60);
 
+  // agendamento
+  const [agenda, setAgenda] = useState([]);
   const [hora, setHora] = useState("");
   const [duracao, setDuracao] = useState(1);
+  const [days, setDays] = useState([1, 3, 5]); // padrão: seg/qua/sex
 
   // -------------------------------
   // Listeners Firestore
   // -------------------------------
   useEffect(() => {
-    const setupListeners = () => {
-      // Agenda
+    const setup = () => {
+      // agendamentos (ordenado por horário e criação)
       const q = query(
         collection(db, "agendamentos"),
         orderBy("time", "asc"),
@@ -51,35 +66,34 @@ export default function App() {
         setAgenda(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
       );
 
-      // Status aspersor
+      // status manual
       const refStatus = doc(db, "status", "aspersor1");
       const unsubStatus = onSnapshot(refStatus, (snap) => {
         const data = snap.data();
         if (data && typeof data.isOn === "boolean") setAspersorLigado(data.isOn);
       });
 
-      // Config geral (auto mode + sliders)
+      // configuração automática
       const refConfig = doc(db, "configuracao", "geral");
       const unsubConfig = onSnapshot(refConfig, (snap) => {
         const data = snap.data();
         if (!data) return;
+        if (typeof data.autoModeEnabled === "boolean") setIsAutoMode(data.autoModeEnabled);
 
-        if (typeof data.autoModeEnabled === "boolean") {
-          setIsAutoMode(data.autoModeEnabled);
-        }
+        // garantir min < max mesmo recebendo do servidor
         if (typeof data.minHumidity === "number") {
-          // garante min < max mesmo ao receber do Firestore
           const incomingMin = data.minHumidity;
           setMinHumidity((prev) => {
-            const maxRef = typeof data.maxHumidity === "number" ? data.maxHumidity : maxHumidity;
+            const maxRef =
+              typeof data.maxHumidity === "number" ? data.maxHumidity : maxHumidity;
             return incomingMin >= maxRef ? Math.max(0, maxRef - 1) : incomingMin;
           });
         }
         if (typeof data.maxHumidity === "number") {
-          // garante max > min mesmo ao receber do Firestore
           const incomingMax = data.maxHumidity;
           setMaxHumidity((prev) => {
-            const minRef = typeof data.minHumidity === "number" ? data.minHumidity : minHumidity;
+            const minRef =
+              typeof data.minHumidity === "number" ? data.minHumidity : minHumidity;
             return incomingMax <= minRef ? Math.min(100, minRef + 1) : incomingMax;
           });
         }
@@ -92,28 +106,24 @@ export default function App() {
       };
     };
 
-    ensureAnonAuth().then(() => {
-      const cleanup = setupListeners();
-      return cleanup;
-    });
+    ensureAnonAuth().then(() => setup());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // -------------------------------
-  // Writes Firestore / Handlers
+  // Escritas/Handlers Firestore
   // -------------------------------
   const toggleAspersor = async () => {
     if (isAutoMode) return;
     try {
       await ensureAnonAuth();
-      const refStatus = doc(db, "status", "aspersor1");
       await setDoc(
-        refStatus,
+        doc(db, "status", "aspersor1"),
         { isOn: !aspersorLigado, updatedAt: serverTimestamp() },
         { merge: true }
       );
-    } catch (err) {
-      console.error("Erro ao alternar aspersor:", err);
+    } catch (e) {
+      console.error("Erro ao alternar aspersor:", e);
       alert("Não foi possível alternar o aspersor.");
     }
   };
@@ -122,6 +132,10 @@ export default function App() {
     try {
       if (!hora || !/^\d{2}:\d{2}$/.test(hora)) {
         alert("Informe um horário válido (HH:MM).");
+        return;
+      }
+      if (!days.length) {
+        alert("Selecione pelo menos um dia da semana.");
         return;
       }
       if (Number(duracao) < 1) {
@@ -133,11 +147,12 @@ export default function App() {
         time: hora,
         minutes: Number(duracao),
         aspersorId: "aspersor1",
+        days: [...new Set(days)].sort(), // 0..6
         createdAt: serverTimestamp(),
       });
       setHora("");
-    } catch (err) {
-      console.error("Erro ao adicionar agendamento:", err);
+    } catch (e) {
+      console.error("Erro ao adicionar agendamento:", e);
       alert("Não foi possível adicionar o agendamento.");
     }
   };
@@ -146,8 +161,8 @@ export default function App() {
     try {
       await ensureAnonAuth();
       await deleteDoc(doc(db, "agendamentos", id));
-    } catch (err) {
-      console.error("Erro ao remover agendamento:", err);
+    } catch (e) {
+      console.error("Erro ao remover agendamento:", e);
       alert("Não foi possível remover o agendamento.");
     }
   };
@@ -160,8 +175,8 @@ export default function App() {
         { ...newConfig, updatedAt: serverTimestamp() },
         { merge: true }
       );
-    } catch (err) {
-      console.error("Erro ao atualizar configuração:", err);
+    } catch (e) {
+      console.error("Erro ao atualizar configuração:", e);
       alert("Não foi possível salvar a configuração.");
     }
   };
@@ -172,15 +187,13 @@ export default function App() {
     updateAutoModeConfig({ autoModeEnabled: next });
   };
 
-  // Slider de MÍNIMO: nunca deixa mínimo >= máximo
+  // sliders com trava (min < max)
   const handleMinHumidityChange = (e) => {
     let v = Number(e.target.value);
     if (v >= maxHumidity) v = Math.max(0, maxHumidity - 1);
     setMinHumidity(v);
     if (isAutoMode) updateAutoModeConfig({ minHumidity: v });
   };
-
-  // Slider de MÁXIMO/ALVO: nunca deixa máximo <= mínimo
   const handleMaxHumidityChange = (e) => {
     let v = Number(e.target.value);
     if (v <= minHumidity) v = Math.min(100, minHumidity + 1);
@@ -208,13 +221,13 @@ export default function App() {
           <h1>Painel da Horta Inteligente</h1>
         </header>
 
-        {/* 1) Cards no topo */}
+        {/* Cards de métricas */}
         <section className="stats">
           <StatCard icon={<span>💧</span>} title="Umidade do Solo" value={`${soil}%`} />
           <StatCard icon={<span>🌡️</span>} title="Temperatura" value={`${temp}°C`} />
         </section>
 
-        {/* 2) Controles */}
+        {/* Controles */}
         <section className="grid">
           <div className="panel">
             <h2>Modo Automático</h2>
@@ -287,9 +300,10 @@ export default function App() {
           </div>
         </section>
 
-        {/* 3) Agendamento */}
+        {/* Agendamento */}
         <section className="panel">
           <h2>Agendamento de Irrigação</h2>
+
           <div className="agendar">
             <input
               type="time"
@@ -297,9 +311,37 @@ export default function App() {
               onChange={(e) => setHora(e.target.value)}
               className="time-input"
             />
+
             <select className="select" disabled value="aspersor1">
               <option value="aspersor1">Aspersor 1</option>
             </select>
+
+            {/* Dias da semana */}
+            <div className="weekday-wrap">
+              <label>Dias:</label>
+              <div className="weekday-group">
+                {WEEKDAYS.map((d) => {
+                  const checked = days.includes(d.v);
+                  return (
+                    <label key={d.v} className={`weekday-pill ${checked ? "on" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setDays((prev) =>
+                            e.target.checked
+                              ? [...prev, d.v]
+                              : prev.filter((x) => x !== d.v)
+                          );
+                        }}
+                      />
+                      {d.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="duracao-wrap">
               <label>Duração (min)</label>
               <input
@@ -310,6 +352,7 @@ export default function App() {
                 className="number-input"
               />
             </div>
+
             <button className="btn add" onClick={addAgendamento}>
               ＋ Adicionar
             </button>
@@ -322,7 +365,11 @@ export default function App() {
               {agenda.map((it) => (
                 <li key={it.id} className="item">
                   <span className="when">
-                    {it.time} • {it.minutes} min • Aspersor 1
+                    {it.time} • {it.minutes} min •{" "}
+                    {it.aspersorId === "aspersor1" ? "Aspersor 1" : it.aspersorId}
+                    {Array.isArray(it.days) && it.days.length ? (
+                      <> • {it.days.map((d) => WEEKDAYS.find((x) => x.v === d)?.label || d).join(", ")}</>
+                    ) : null}
                   </span>
                   <button
                     className="btn small danger"
@@ -336,9 +383,9 @@ export default function App() {
           )}
         </section>
 
-        {/* 4) Gráfico por último */}
+        {/* Gráfico por último (7 dias no componente) */}
         <section className="panel">
-          <h2>Histórico das Últimas 24 Horas</h2>
+          <h2>Histórico dos Últimos 7 Dias</h2>
           <div className="chart-container">
             <HistoryChart />
           </div>
