@@ -16,16 +16,15 @@ import {
 } from "firebase/firestore";
 import { db, ensureAnonAuth } from "./lib/firebase";
 
-// 🔐 Garante autenticação anônima automática (usa função do firebase.js)
+// 🔐 Garante autenticação anônima (requerida pelas regras Firestore)
 ensureAnonAuth();
 
-
 /**
- * HORTA INTELIGENTE – DASHBOARD (COM FIRESTORE REAL)
- * --------------------------------------------------
- * ➤ Funciona com as coleções e regras fornecidas.
- * ➤ Usa autenticação anônima para permitir leituras e escritas.
- * ➤ Coleta: configuracao, agendamentos, historico, status.
+ * HORTA INTELIGENTE – DASHBOARD (INTEGRAÇÃO FIRESTORE)
+ * -----------------------------------------------------
+ * ✅ Totalmente compatível com as regras de segurança enviadas.
+ * ✅ Usa autenticação anônima.
+ * ✅ Corrige agendamento (dias da semana e formato).
  */
 
 // =============== FIRESTORE HOOKS ===============
@@ -89,26 +88,39 @@ function useAutoSettings() {
 
 function useSchedule() {
   const [schedule, setSchedule] = useState({
-    days: [],
+    days: [false, false, false, false, false, false, false],
     time: "06:00",
     minutes: 15,
     aspersorId: "aspersor1",
   });
 
+  // Carrega do Firestore
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "agendamentos"), (snap) => {
       const docs = snap.docs.map((d) => d.data());
-      if (docs[0]) setSchedule(docs[0]);
+      if (docs[0]) {
+        const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+        const dias = labels.map((d) => docs[0].days?.includes(d));
+        setSchedule({ ...docs[0], days: dias });
+      }
     });
     return unsub;
   }, []);
 
+  // Salva no Firestore
   const save = async (newSched) => {
+    const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    const diasSelecionados = labels.filter((_, i) => newSched.days[i]);
+    if (diasSelecionados.length === 0) {
+      alert("Selecione pelo menos um dia da semana!");
+      return;
+    }
+
     await setDoc(doc(db, "agendamentos", `prog-${Date.now()}`), {
       aspersorId: "aspersor1",
       time: newSched.start,
       minutes: newSched.duration,
-      days: newSched.days,
+      days: diasSelecionados,
       createdAt: new Date(),
     });
   };
@@ -269,8 +281,7 @@ function AutoIrrigationCard({ settings, onSave }) {
     setMaxHumidity(settings.maxHumidity);
   }, [settings]);
 
-  const save = () =>
-    onSave({ autoModeEnabled, minHumidity, maxHumidity });
+  const save = () => onSave({ autoModeEnabled, minHumidity, maxHumidity });
 
   return (
     <Card>
@@ -348,6 +359,12 @@ function ScheduleCard({ schedule, onSave }) {
   const [days, setDays] = useState(schedule.days || []);
   const [start, setStart] = useState(schedule.time || "06:00");
   const [duration, setDuration] = useState(schedule.minutes || 15);
+
+  useEffect(() => {
+    setDays(schedule.days || []);
+    setStart(schedule.time || "06:00");
+    setDuration(schedule.minutes || 15);
+  }, [schedule]);
 
   const toggleDay = (idx) =>
     setDays((old) => old.map((v, i) => (i === idx ? !v : v)));
