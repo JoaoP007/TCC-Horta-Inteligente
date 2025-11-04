@@ -14,15 +14,11 @@ import {
   setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "./lib/firebase";
-import { getAuth, signInAnonymously } from "firebase/auth";
-import { app } from "./lib/firebase";
+import { db, ensureAnonAuth } from "./lib/firebase";
 
-// 🔐 Faz login anônimo automaticamente (necessário pelas regras Firestore)
-const auth = getAuth(app);
-signInAnonymously(auth).catch((err) =>
-  console.error("Erro ao autenticar anonimamente:", err)
-);
+// 🔐 Garante autenticação anônima automática (usa função do firebase.js)
+ensureAnonAuth();
+
 
 /**
  * HORTA INTELIGENTE – DASHBOARD (COM FIRESTORE REAL)
