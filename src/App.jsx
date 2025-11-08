@@ -487,12 +487,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="border-b border-gray-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-7 py-6 flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xl">
             🌿
           </div>
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">
+            <h1 className="text-3xl font-semibold text-gray-900">
               Horta Inteligente
             </h1>
             <p className="text-gray-500 -mt-0.5">
