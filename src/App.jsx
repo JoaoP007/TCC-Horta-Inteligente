@@ -503,4 +503,22 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 grid gap-6">
-        <div className="grid grid-cols
+        {/* Linha 1 – Umidade, Manual e Automático */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <HumidityCard value={currentHum} />
+          <ManualControlCard />
+          <AutoIrrigationCard settings={settings} onSave={saveAuto} />
+        </div>
+
+        {/* Linha 2 – Programação e Histórico */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <ScheduleCard schedule={schedule} onSave={saveSchedule} />
+          <HumidityHistory data={history} />
+        </div>
+
+        {/* Linha 3 – Lista de agendamentos existentes */}
+        <ScheduleList />
+      </main>
+    </div>
+  );
+}
