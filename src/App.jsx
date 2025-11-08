@@ -13,24 +13,15 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { db, ensureAnonAuth } from "./lib/firebase";
 
-// 🔐 Garante autenticação anônima (requerida pelas regras Firestore)
 ensureAnonAuth();
 
-/**
- * HORTA INTELIGENTE – DASHBOARD (INTEGRAÇÃO FIRESTORE)
- * -----------------------------------------------------
- * ✅ Totalmente compatível com as regras de segurança enviadas.
- * ✅ Usa autenticação anônima.
- * ✅ Corrige agendamento (dias da semana e formato).
- */
-
-// =============== FIRESTORE HOOKS ===============
+// ===================== HOOKS =====================
 function useHumidityHistory() {
   const [data, setData] = useState([]);
-
   useEffect(() => {
     const q = collection(db, "historico");
     const unsub = onSnapshot(q, (snapshot) => {
@@ -49,7 +40,6 @@ function useHumidityHistory() {
     });
     return unsub;
   }, []);
-
   return data;
 }
 
@@ -74,10 +64,7 @@ function useAutoSettings() {
   const save = async (newSet) => {
     await setDoc(
       doc(db, "configuracao", "geral"),
-      {
-        ...newSet,
-        updatedAt: new Date(),
-      },
+      { ...newSet, updatedAt: new Date() },
       { merge: true }
     );
     setSettings(newSet);
@@ -94,7 +81,6 @@ function useSchedule() {
     aspersorId: "aspersor1",
   });
 
-  // Carrega do Firestore
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "agendamentos"), (snap) => {
       const docs = snap.docs.map((d) => d.data());
@@ -107,7 +93,6 @@ function useSchedule() {
     return unsub;
   }, []);
 
-  // Salva no Firestore
   const save = async (newSched) => {
     const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     const diasSelecionados = labels.filter((_, i) => newSched.days[i]);
@@ -115,7 +100,6 @@ function useSchedule() {
       alert("Selecione pelo menos um dia da semana!");
       return;
     }
-
     await setDoc(doc(db, "agendamentos", `prog-${Date.now()}`), {
       aspersorId: "aspersor1",
       time: newSched.start,
@@ -131,10 +115,7 @@ function useSchedule() {
 async function triggerActuator() {
   try {
     const ref = doc(db, "status", "aspersor1");
-    await setDoc(ref, {
-      isOn: true,
-      updatedAt: new Date(),
-    });
+    await setDoc(ref, { isOn: true, updatedAt: new Date() });
     return { ok: true };
   } catch (e) {
     console.error("Erro ao acionar aspersor:", e);
@@ -142,7 +123,7 @@ async function triggerActuator() {
   }
 }
 
-// =============== COMPONENTES VISUAIS ===============
+// ===================== COMPONENTES =====================
 const Card = ({ children }) => (
   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
     {children}
@@ -159,11 +140,11 @@ const SectionTitle = ({ icon, children, subtitle }) => (
   </div>
 );
 
+// 💧 Umidade
 function HumidityCard({ value }) {
   const pct = Math.max(0, Math.min(100, value ?? 0));
   const circumference = 2 * Math.PI * 80;
   const stroke = (pct / 100) * circumference;
-
   return (
     <Card>
       <SectionTitle
@@ -172,14 +153,8 @@ function HumidityCard({ value }) {
       >
         Umidade do Solo
       </SectionTitle>
-
       <div className="flex items-center justify-center py-4">
-        <svg
-          width="190"
-          height="190"
-          viewBox="0 0 200 200"
-          className="select-none"
-        >
+        <svg width="190" height="190" viewBox="0 0 200 200">
           <circle
             cx="100"
             cy="100"
@@ -214,7 +189,6 @@ function HumidityCard({ value }) {
             x="100"
             y="130"
             textAnchor="middle"
-            dominantBaseline="central"
             fontSize="16"
             fill="#64748b"
           >
@@ -226,18 +200,16 @@ function HumidityCard({ value }) {
   );
 }
 
+// 🌿 Controle Manual
 function ManualControlCard() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("Inativo");
 
   const handleClick = async () => {
-    try {
-      setLoading(true);
-      const res = await triggerActuator();
-      if (res.ok) setStatus((s) => (s === "Inativo" ? "Ativo" : "Inativo"));
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    const res = await triggerActuator();
+    if (res.ok) setStatus((s) => (s === "Inativo" ? "Ativo" : "Inativo"));
+    setLoading(false);
   };
 
   return (
@@ -251,7 +223,6 @@ function ManualControlCard() {
         <div className="w-28 h-28 rounded-full bg-emerald-50 flex items-center justify-center">
           <span className="text-4xl text-emerald-700">🌿</span>
         </div>
-
         <button
           onClick={handleClick}
           disabled={loading}
@@ -259,7 +230,6 @@ function ManualControlCard() {
         >
           {loading ? "Acionando..." : "Ligar Aspersor 1"}
         </button>
-
         <p className="text-gray-700">
           Status: <span className="font-medium">{status}</span>
         </p>
@@ -268,6 +238,7 @@ function ManualControlCard() {
   );
 }
 
+// 💦 Automático
 function AutoIrrigationCard({ settings, onSave }) {
   const [autoModeEnabled, setAutoModeEnabled] = useState(
     settings.autoModeEnabled
@@ -322,7 +293,6 @@ function AutoIrrigationCard({ settings, onSave }) {
           type="range"
           min={10}
           max={90}
-          step={1}
           value={minHumidity}
           onChange={(e) => setMinHumidity(Number(e.target.value))}
           className="w-full accent-emerald-600"
@@ -338,7 +308,6 @@ function AutoIrrigationCard({ settings, onSave }) {
           type="range"
           min={10}
           max={100}
-          step={1}
           value={maxHumidity}
           onChange={(e) => setMaxHumidity(Number(e.target.value))}
           className="w-full accent-emerald-600"
@@ -355,32 +324,26 @@ function AutoIrrigationCard({ settings, onSave }) {
   );
 }
 
+// 📅 Agendamento
 function ScheduleCard({ schedule, onSave }) {
   const [days, setDays] = useState(schedule.days || []);
   const [start, setStart] = useState(schedule.time || "06:00");
   const [duration, setDuration] = useState(schedule.minutes || 15);
-
   useEffect(() => {
     setDays(schedule.days || []);
     setStart(schedule.time || "06:00");
     setDuration(schedule.minutes || 15);
   }, [schedule]);
 
-  const toggleDay = (idx) =>
-    setDays((old) => old.map((v, i) => (i === idx ? !v : v)));
+  const toggleDay = (i) => setDays((old) => old.map((v, idx) => (idx === i ? !v : v)));
   const save = () => onSave({ days, start, duration });
-
   const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
   return (
     <Card>
-      <SectionTitle
-        icon={<span className="text-emerald-600">📅</span>}
-        subtitle="Defina horários e duração"
-      >
+      <SectionTitle icon={<span className="text-emerald-600">📅</span>}>
         Irrigação Programada
       </SectionTitle>
-
       <div className="mb-5">
         <p className="text-gray-800 font-medium mb-2">Dias da Semana</p>
         <div className="flex flex-wrap gap-3">
@@ -432,18 +395,63 @@ function ScheduleCard({ schedule, onSave }) {
   );
 }
 
-function HumidityHistory({ data }) {
-  const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
+// 📋 Lista de agendamentos
+function ScheduleList() {
+  const [items, setItems] = useState([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "agendamentos"), (snap) => {
+      const arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setItems(arr.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds));
+    });
+    return unsub;
+  }, []);
+
+  const excluir = async (id) => {
+    if (window.confirm("Excluir este agendamento?")) {
+      await deleteDoc(doc(db, "agendamentos", id));
+    }
+  };
 
   return (
     <Card>
-      <SectionTitle
-        icon={<span className="text-emerald-600">📈</span>}
-        subtitle="Últimos 15 dias"
-      >
+      <SectionTitle icon={<span className="text-emerald-600">📋</span>}>
+        Lista de Agendamentos
+      </SectionTitle>
+      {items.length === 0 ? (
+        <p className="text-gray-500">Nenhum agendamento cadastrado.</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((ag) => (
+            <li
+              key={ag.id}
+              className="flex justify-between items-center border rounded-lg p-3"
+            >
+              <div>
+                <strong>{ag.days?.join(", ")}</strong> — {ag.time} ({ag.minutes} min)
+              </div>
+              <button
+                onClick={() => excluir(ag.id)}
+                className="bg-red-500 text-white px-2 py-1 rounded"
+              >
+                Excluir
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+// 📈 Histórico
+function HumidityHistory({ data }) {
+  const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
+  return (
+    <Card>
+      <SectionTitle icon={<span className="text-emerald-600">📈</span>}>
         Histórico de Umidade
       </SectionTitle>
-
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
@@ -453,22 +461,14 @@ function HumidityHistory({ data }) {
               interval={0}
               tick={{ fontSize: 12, fill: "#475569" }}
             />
-            <YAxis
-              domain={[0, 100]}
-              tick={{ fontSize: 12, fill: "#475569" }}
-              tickCount={6}
-            />
-            <Tooltip
-              formatter={(v) => [`${v}%`, "Umidade"]}
-              labelFormatter={(l) => `Data: ${l}`}
-            />
+            <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: "#475569" }} />
+            <Tooltip formatter={(v) => [`${v}%`, "Umidade"]} />
             <Line
               type="monotone"
               dataKey="humidity"
               stroke="#10b981"
               strokeWidth={3}
               dot={{ r: 3 }}
-              activeDot={{ r: 5 }}
             />
           </LineChart>
         </ResponsiveContainer>
@@ -477,7 +477,7 @@ function HumidityHistory({ data }) {
   );
 }
 
-// =============== APP ===============
+// ===================== APP PRINCIPAL =====================
 export default function App() {
   const history = useHumidityHistory();
   const currentHum = useCurrentHumidity(history);
@@ -503,17 +503,4 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-6 grid gap-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          <HumidityCard value={currentHum} />
-          <ManualControlCard />
-          <AutoIrrigationCard settings={settings} onSave={saveAuto} />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ScheduleCard schedule={schedule} onSave={saveSchedule} />
-          <HumidityHistory data={history} />
-        </div>
-      </main>
-    </div>
-  );
-}
+        <div className="grid grid-cols
