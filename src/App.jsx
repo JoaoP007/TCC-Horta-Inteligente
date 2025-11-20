@@ -22,24 +22,41 @@ ensureAnonAuth();
 // ===================== HOOKS =====================
 function useHumidityHistory() {
   const [data, setData] = useState([]);
+
   useEffect(() => {
     const q = collection(db, "historico");
     const unsub = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map((doc) => doc.data());
+      const docs = snapshot.docs
+        .map((doc) => doc.data())
+        // garante que só entra quem tem createdAt e umidade
+        .filter(
+          (d) => d.createdAt && typeof d.umidade === "number"
+        );
+
       const sorted = docs
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+        // Timestamp tem .toMillis() pra ordenar certinho
+        .sort(
+          (a, b) =>
+            a.createdAt.toMillis() - b.createdAt.toMillis()
+        )
         .slice(-15)
         .map((d) => ({
-          dateLabel: new Date(d.createdAt).toLocaleDateString("pt-BR", {
-            day: "2-digit",
-            month: "2-digit",
-          }),
+          // aqui usamos .toDate() para virar Date normal
+          dateLabel: d.createdAt
+            .toDate()
+            .toLocaleDateString("pt-BR", {
+              day: "2-digit",
+              month: "2-digit",
+            }),
           humidity: d.umidade ?? 0,
         }));
+
       setData(sorted);
     });
+
     return unsub;
   }, []);
+
   return data;
 }
 
