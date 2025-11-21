@@ -20,6 +20,8 @@ import { db, ensureAnonAuth } from "./lib/firebase";
 ensureAnonAuth();
 
 // ===================== HOOKS =====================
+
+// Histórico de umidade (últimos 15 registros da coleção "historico")
 function useHumidityHistory() {
   const [data, setData] = useState([]);
 
@@ -28,27 +30,25 @@ function useHumidityHistory() {
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
         .map((doc) => doc.data())
-        // garante que só entra quem tem createdAt e umidade
+        // garante que só entra quem tem createdAt e umidade numérica
         .filter(
-          (d) => d.createdAt && typeof d.umidade === "number"
+          (d) =>
+            d.createdAt &&
+            typeof d.umidade === "number" &&
+            typeof d.createdAt.toMillis === "function"
         );
 
       const sorted = docs
-        // Timestamp tem .toMillis() pra ordenar certinho
-        .sort(
-          (a, b) =>
-            a.createdAt.toMillis() - b.createdAt.toMillis()
-        )
+        .sort((a, b) => a.createdAt.toMillis() - b.createdAt.toMillis())
         .slice(-15)
         .map((d) => ({
-          // aqui usamos .toDate() para virar Date normal
           dateLabel: d.createdAt
             .toDate()
             .toLocaleDateString("pt-BR", {
               day: "2-digit",
               month: "2-digit",
             }),
-          humidity: d.umidade ?? 0,
+          humidity: d.umidade,
         }));
 
       setData(sorted);
@@ -60,10 +60,12 @@ function useHumidityHistory() {
   return data;
 }
 
+// Umidade atual (último ponto do histórico)
 function useCurrentHumidity(history) {
   return history.length ? history[history.length - 1].humidity : 0;
 }
 
+// Configurações do modo automático
 function useAutoSettings() {
   const [settings, setSettings] = useState({
     autoModeEnabled: true,
@@ -73,7 +75,19 @@ function useAutoSettings() {
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "configuracao", "geral"), (snap) => {
-      if (snap.exists()) setSettings(snap.data());
+      if (snap.exists()) {
+        const data = snap.data();
+        setSettings({
+          autoModeEnabled:
+            typeof data.autoModeEnabled === "boolean"
+              ? data.autoModeEnabled
+              : true,
+          minHumidity:
+            typeof data.minHumidity === "number" ? data.minHumidity : 50,
+          maxHumidity:
+            typeof data.maxHumidity === "number" ? data.maxHumidity : 80,
+        });
+      }
     });
     return unsub;
   }, []);
@@ -90,6 +104,7 @@ function useAutoSettings() {
   return { settings, save };
 }
 
+// Agendamento de irrigação
 function useSchedule() {
   const [schedule, setSchedule] = useState({
     days: [false, false, false, false, false, false, false],
@@ -129,10 +144,11 @@ function useSchedule() {
   return { schedule, save };
 }
 
-async function triggerActuator() {
+// Acionar aspersor (status manual) – recebe o estado desejado
+async function triggerActuator(nextState) {
   try {
     const ref = doc(db, "status", "aspersor1");
-    await setDoc(ref, { isOn: true, updatedAt: new Date() });
+    await setDoc(ref, { isOn: nextState, updatedAt: new Date() });
     return { ok: true };
   } catch (e) {
     console.error("Erro ao acionar aspersor:", e);
@@ -141,6 +157,7 @@ async function triggerActuator() {
 }
 
 // ===================== COMPONENTES =====================
+
 const Card = ({ children }) => (
   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
     {children}
@@ -157,7 +174,7 @@ const SectionTitle = ({ icon, children, subtitle }) => (
   </div>
 );
 
-// 💧 Umidade
+// 💧 Umidade atual
 function HumidityCard({ value }) {
   const pct = Math.max(0, Math.min(100, value ?? 0));
   const circumference = 2 * Math.PI * 80;
@@ -217,15 +234,18 @@ function HumidityCard({ value }) {
   );
 }
 
-// 🌿 Controle Manual
+// 🌿 Controle Manual – alterna Ligar / Desligar Aspersor
 function ManualControlCard() {
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("Inativo");
+  const [isOn, setIsOn] = useState(false);
 
   const handleClick = async () => {
+    const proximoEstado = !isOn;
     setLoading(true);
-    const res = await triggerActuator();
-    if (res.ok) setStatus((s) => (s === "Inativo" ? "Ativo" : "Inativo"));
+    const res = await triggerActuator(proximoEstado);
+    if (res.ok) {
+      setIsOn(proximoEstado);
+    }
     setLoading(false);
   };
 
@@ -245,17 +265,24 @@ function ManualControlCard() {
           disabled={loading}
           className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-60"
         >
-          {loading ? "Acionando..." : "Ligar Aspersor 1"}
+          {loading
+            ? isOn
+              ? "Desligando..."
+              : "Ligando..."
+            : isOn
+            ? "Desligar Aspersor"
+            : "Ligar Aspersor"}
         </button>
         <p className="text-gray-700">
-          Status: <span className="font-medium">{status}</span>
+          Status:{" "}
+          <span className="font-medium">{isOn ? "Ativo" : "Inativo"}</span>
         </p>
       </div>
     </Card>
   );
 }
 
-// 💦 Automático
+// 💦 Automático – impede máxima < mínima
 function AutoIrrigationCard({ settings, onSave }) {
   const [autoModeEnabled, setAutoModeEnabled] = useState(
     settings.autoModeEnabled
@@ -269,7 +296,29 @@ function AutoIrrigationCard({ settings, onSave }) {
     setMaxHumidity(settings.maxHumidity);
   }, [settings]);
 
-  const save = () => onSave({ autoModeEnabled, minHumidity, maxHumidity });
+  const handleMinChange = (value) => {
+    const v = Number(value);
+    setMinHumidity(v);
+    if (v > maxHumidity) {
+      setMaxHumidity(v);
+    }
+  };
+
+  const handleMaxChange = (value) => {
+    const v = Number(value);
+    setMaxHumidity(v);
+    if (v < minHumidity) {
+      setMinHumidity(v);
+    }
+  };
+
+  const save = () => {
+    if (maxHumidity < minHumidity) {
+      alert("A umidade máxima não pode ser menor que a umidade mínima.");
+      return;
+    }
+    onSave({ autoModeEnabled, minHumidity, maxHumidity });
+  };
 
   return (
     <Card>
@@ -311,7 +360,7 @@ function AutoIrrigationCard({ settings, onSave }) {
           min={10}
           max={90}
           value={minHumidity}
-          onChange={(e) => setMinHumidity(Number(e.target.value))}
+          onChange={(e) => handleMinChange(e.target.value)}
           className="w-full accent-emerald-600"
         />
       </div>
@@ -326,7 +375,7 @@ function AutoIrrigationCard({ settings, onSave }) {
           min={10}
           max={100}
           value={maxHumidity}
-          onChange={(e) => setMaxHumidity(Number(e.target.value))}
+          onChange={(e) => handleMaxChange(e.target.value)}
           className="w-full accent-emerald-600"
         />
       </div>
@@ -346,13 +395,15 @@ function ScheduleCard({ schedule, onSave }) {
   const [days, setDays] = useState(schedule.days || []);
   const [start, setStart] = useState(schedule.time || "06:00");
   const [duration, setDuration] = useState(schedule.minutes || 15);
+
   useEffect(() => {
     setDays(schedule.days || []);
     setStart(schedule.time || "06:00");
     setDuration(schedule.minutes || 15);
   }, [schedule]);
 
-  const toggleDay = (i) => setDays((old) => old.map((v, idx) => (idx === i ? !v : v)));
+  const toggleDay = (i) =>
+    setDays((old) => old.map((v, idx) => (idx === i ? !v : v)));
   const save = () => onSave({ days, start, duration });
   const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
@@ -445,7 +496,8 @@ function ScheduleList() {
               className="flex justify-between items-center border rounded-lg p-3"
             >
               <div>
-                <strong>{ag.days?.join(", ")}</strong> — {ag.time} ({ag.minutes} min)
+                <strong>{ag.days?.join(", ")}</strong> — {ag.time} ({ag.minutes}{" "}
+                min)
               </div>
               <button
                 onClick={() => excluir(ag.id)}
@@ -461,7 +513,7 @@ function ScheduleList() {
   );
 }
 
-// 📈 Histórico
+// 📈 Histórico (gráfico)
 function HumidityHistory({ data }) {
   const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
   return (
