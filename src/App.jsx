@@ -64,28 +64,29 @@ function useCurrentHumidity(history) {
   return history.length ? history[history.length - 1].humidity : 0;
 }
 
-// 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria" e monta últimos 15 dias
+// 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria" (usa APENAS o ID como data)
 function useDailyAverageHistory() {
   const [data, setData] = useState([]);
 
   useEffect(() => {
     const q = collection(db, "mediaDiaria");
     const unsub = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
-
-      // ordena por data (YYYY-MM-DD) e pega até 15 dias
-      const sorted = docs
-        .sort((a, b) => {
-          const da = a.data || a.id;
-          const dbb = b.data || b.id;
-          return String(da).localeCompare(String(dbb));
+      const docs = snapshot.docs
+        .map((d) => {
+          const docData = d.data();
+          return {
+            id: d.id, // "2025-11-24"
+            media: docData.media,
+          };
         })
+        .filter((d) => typeof d.media === "number");
+
+      // ordena por id (YYYY-MM-DD) e pega até 15 dias
+      const sorted = docs
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
         .slice(-15)
         .map((d) => {
-          const iso = d.data || d.id; // ex: "2025-11-24"
+          const iso = d.id; // ex: "2025-11-24"
           const [year, month, day] = String(iso).split("-");
           return {
             dateLabel: `${day}/${month}`, // 24/11
@@ -181,7 +182,7 @@ function useSchedule() {
   return { schedule, save };
 }
 
-// Acionar aspersor (status manual) – recebe o estado desejado
+// Acionar aspersor (status manual)
 async function triggerActuator(nextState) {
   try {
     const ref = doc(db, "status", "aspersor1");
@@ -271,7 +272,7 @@ function HumidityCard({ value }) {
   );
 }
 
-// 🌿 Controle Manual – alterna Ligar / Desligar Aspersor
+// 🌿 Controle Manual
 function ManualControlCard() {
   const [loading, setLoading] = useState(false);
   const [isOn, setIsOn] = useState(false);
@@ -319,7 +320,7 @@ function ManualControlCard() {
   );
 }
 
-// 💦 Automático – impede máxima < mínima
+// 💦 Automático
 function AutoIrrigationCard({ settings, onSave }) {
   const [autoModeEnabled, setAutoModeEnabled] = useState(
     settings.autoModeEnabled
@@ -550,7 +551,7 @@ function ScheduleList() {
   );
 }
 
-// 📈 Histórico (gráfico) – agora com MÉDIA DIÁRIA
+// 📈 Histórico (gráfico) – MÉDIA DIÁRIA
 function HumidityHistory({ data }) {
   const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
 
@@ -586,8 +587,8 @@ function HumidityHistory({ data }) {
 
 // ===================== APP PRINCIPAL =====================
 export default function App() {
-  const history = useHumidityHistory();              // leituras individuais
-  const currentHum = useCurrentHumidity(history);    // umidade atual
+  const history = useHumidityHistory(); // leituras individuais
+  const currentHum = useCurrentHumidity(history); // umidade atual
   const dailyAverageHistory = useDailyAverageHistory(); // média diária
   const { settings, save: saveAuto } = useAutoSettings();
   const { schedule, save: saveSchedule } = useSchedule();
