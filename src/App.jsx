@@ -29,7 +29,7 @@ function useHumidityHistory() {
     const q = collection(db, "historico");
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
-        .map((doc) => doc.data())
+        .map((docSnap) => docSnap.data())
         .filter(
           (d) =>
             d.createdAt &&
@@ -73,15 +73,21 @@ function useDailyAverageHistory() {
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
         .map((d) => {
-          const docData = d.data();
+          const docData = d.data() || {};
           return {
             id: d.id, // "2025-11-24"
             media: docData.media,
           };
         })
-        .filter((d) => typeof d.media === "number");
+        // 🔒 ignora qualquer documento que não tenha número válido
+        .filter(
+          (d) =>
+            d.media !== undefined &&
+            d.media !== null &&
+            !isNaN(d.media) &&
+            typeof d.media === "number"
+        );
 
-      // ordena por id (YYYY-MM-DD) e pega até 15 dias
       const sorted = docs
         .sort((a, b) => String(a.id).localeCompare(String(b.id)))
         .slice(-15)
