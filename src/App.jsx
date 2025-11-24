@@ -21,7 +21,7 @@ ensureAnonAuth();
 
 // ===================== HOOKS =====================
 
-// Histórico de umidade (últimos 15 registros da coleção "historico")
+// Histórico de umidade (coleção "historico") – usado só para valor atual
 function useHumidityHistory() {
   const [data, setData] = useState([]);
 
@@ -30,7 +30,6 @@ function useHumidityHistory() {
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
         .map((doc) => doc.data())
-        // garante que só entra quem tem createdAt e umidade numérica
         .filter(
           (d) =>
             d.createdAt &&
@@ -63,6 +62,44 @@ function useHumidityHistory() {
 // Umidade atual (último ponto do histórico)
 function useCurrentHumidity(history) {
   return history.length ? history[history.length - 1].humidity : 0;
+}
+
+// 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria" e monta últimos 15 dias
+function useDailyAverageHistory() {
+  const [data, setData] = useState([]);
+
+  useEffect(() => {
+    const q = collection(db, "mediaDiaria");
+    const unsub = onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      }));
+
+      // ordena por data (YYYY-MM-DD) e pega até 15 dias
+      const sorted = docs
+        .sort((a, b) => {
+          const da = a.data || a.id;
+          const dbb = b.data || b.id;
+          return String(da).localeCompare(String(dbb));
+        })
+        .slice(-15)
+        .map((d) => {
+          const iso = d.data || d.id; // ex: "2025-11-24"
+          const [year, month, day] = String(iso).split("-");
+          return {
+            dateLabel: `${day}/${month}`, // 24/11
+            average: d.media,
+          };
+        });
+
+      setData(sorted);
+    });
+
+    return unsub;
+  }, []);
+
+  return data;
 }
 
 // Configurações do modo automático
@@ -513,13 +550,14 @@ function ScheduleList() {
   );
 }
 
-// 📈 Histórico (gráfico)
+// 📈 Histórico (gráfico) – agora com MÉDIA DIÁRIA
 function HumidityHistory({ data }) {
   const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
+
   return (
     <Card>
       <SectionTitle icon={<span className="text-emerald-600">📈</span>}>
-        Histórico de Umidade
+        Histórico de Umidade (média diária)
       </SectionTitle>
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
@@ -531,10 +569,10 @@ function HumidityHistory({ data }) {
               tick={{ fontSize: 12, fill: "#475569" }}
             />
             <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: "#475569" }} />
-            <Tooltip formatter={(v) => [`${v}%`, "Umidade"]} />
+            <Tooltip formatter={(v) => [`${v}%`, "Média diária"]} />
             <Line
               type="monotone"
-              dataKey="humidity"
+              dataKey="average"
               stroke="#10b981"
               strokeWidth={3}
               dot={{ r: 3 }}
@@ -548,8 +586,9 @@ function HumidityHistory({ data }) {
 
 // ===================== APP PRINCIPAL =====================
 export default function App() {
-  const history = useHumidityHistory();
-  const currentHum = useCurrentHumidity(history);
+  const history = useHumidityHistory();              // leituras individuais
+  const currentHum = useCurrentHumidity(history);    // umidade atual
+  const dailyAverageHistory = useDailyAverageHistory(); // média diária
   const { settings, save: saveAuto } = useAutoSettings();
   const { schedule, save: saveSchedule } = useSchedule();
 
@@ -579,13 +618,13 @@ export default function App() {
           <AutoIrrigationCard settings={settings} onSave={saveAuto} />
         </div>
 
-        {/* Linha 2 – Programação e Histórico */}
+        {/* Linha 2 – Programação e Histórico (média diária) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ScheduleCard schedule={schedule} onSave={saveSchedule} />
-          <HumidityHistory data={history} />
+          <HumidityHistory data={dailyAverageHistory} />
         </div>
 
-        {/* Linha 3 – Lista de agendamentos existentes */}
+        {/* Linha 3 – Lista de agendamentos */}
         <ScheduleList />
       </main>
     </div>
