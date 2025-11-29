@@ -64,38 +64,52 @@ function useCurrentHumidity(history) {
   return history.length ? history[history.length - 1].humidity : 0;
 }
 
-// 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria" (usa APENAS o ID como data)
+// 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria"
+// Aceita tanto campo "media" quanto "umidade" (string ou número)
 function useDailyAverageHistory() {
   const [data, setData] = useState([]);
 
   useEffect(() => {
     const q = collection(db, "mediaDiaria");
+
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
         .map((d) => {
           const docData = d.data() || {};
+
+          // data pode estar no campo "data" ou no próprio ID (2025-11-20)
+          const rawDate = docData.data || d.id;
+
+          // valor pode estar em "media" ou "umidade"
+          const rawValue =
+            docData.media !== undefined && docData.media !== null
+              ? docData.media
+              : docData.umidade;
+
+          const mediaNumber = Number(rawValue);
+
+          if (!rawDate || Number.isNaN(mediaNumber)) {
+            return null; // ignora docs inválidos
+          }
+
           return {
-            id: d.id, // "2025-11-24"
-            media: docData.media,
+            rawDate,
+            media: mediaNumber,
           };
         })
-        // 🔒 ignora qualquer documento que não tenha número válido
-        .filter(
-          (d) =>
-            d.media !== undefined &&
-            d.media !== null &&
-            !isNaN(d.media) &&
-            typeof d.media === "number"
-        );
+        .filter(Boolean); // remove nulls
 
+      // ordenar pela data ISO (AAAA-MM-DD)
       const sorted = docs
-        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
-        .slice(-15)
+        .sort((a, b) => String(a.rawDate).localeCompare(String(b.rawDate)))
+        .slice(-15) // últimos 15 dias
         .map((d) => {
-          const iso = d.id; // ex: "2025-11-24"
-          const [year, month, day] = String(iso).split("-");
+          const [year, month, day] = String(d.rawDate).split("-");
+          const label =
+            year && month && day ? `${day}/${month}` : String(d.rawDate);
+
           return {
-            dateLabel: `${day}/${month}`, // 24/11
+            dateLabel: label,
             average: d.media,
           };
         });
