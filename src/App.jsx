@@ -26,7 +26,7 @@ function useHumidityHistory() {
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    const q = collection(db, "historico");
+    const q = collection(db, "leiturasUmidade");
     const unsub = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs
         .map((docSnap) => docSnap.data())
