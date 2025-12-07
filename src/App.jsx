@@ -21,7 +21,7 @@ ensureAnonAuth();
 
 // ===================== HOOKS =====================
 
-// Histórico de umidade (coleção "historico") – usado só para valor atual
+// Histórico de umidade (coleção "leiturasUmidade") – usado só para valor atual
 function useHumidityHistory() {
   const [data, setData] = useState([]);
 
@@ -65,7 +65,6 @@ function useCurrentHumidity(history) {
 }
 
 // 🔢 MÉDIA DIÁRIA – lê coleção "mediaDiaria"
-// Aceita tanto campo "media" quanto "umidade" (string ou número)
 function useDailyAverageHistory() {
   const [data, setData] = useState([]);
 
@@ -77,10 +76,8 @@ function useDailyAverageHistory() {
         .map((d) => {
           const docData = d.data() || {};
 
-          // data pode estar no campo "data" ou no próprio ID (2025-11-20)
           const rawDate = docData.data || d.id;
 
-          // valor pode estar em "media" ou "umidade"
           const rawValue =
             docData.media !== undefined && docData.media !== null
               ? docData.media
@@ -89,7 +86,7 @@ function useDailyAverageHistory() {
           const mediaNumber = Number(rawValue);
 
           if (!rawDate || Number.isNaN(mediaNumber)) {
-            return null; // ignora docs inválidos
+            return null;
           }
 
           return {
@@ -97,12 +94,11 @@ function useDailyAverageHistory() {
             media: mediaNumber,
           };
         })
-        .filter(Boolean); // remove nulls
+        .filter(Boolean);
 
-      // ordenar pela data ISO (AAAA-MM-DD)
       const sorted = docs
         .sort((a, b) => String(a.rawDate).localeCompare(String(b.rawDate)))
-        .slice(-15) // últimos 15 dias
+        .slice(-15)
         .map((d) => {
           const [year, month, day] = String(d.rawDate).split("-");
           const label =
@@ -162,7 +158,7 @@ function useAutoSettings() {
   return { settings, save };
 }
 
-// Agendamento de irrigação
+// 📅 Agendamento de irrigação (usa UM doc fixo: agendamentos/aspersor1)
 function useSchedule() {
   const [schedule, setSchedule] = useState({
     days: [false, false, false, false, false, false, false],
@@ -172,14 +168,25 @@ function useSchedule() {
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "agendamentos"), (snap) => {
-      const docs = snap.docs.map((d) => d.data());
-      if (docs[0]) {
-        const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-        const dias = labels.map((d) => docs[0].days?.includes(d));
-        setSchedule({ ...docs[0], days: dias });
-      }
+    const ref = doc(db, "agendamentos", "aspersor1");
+    const unsub = onSnapshot(ref, (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data();
+
+      const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+      const diasBool = labels.map((d) => data.days?.includes(d));
+
+      setSchedule({
+        days: diasBool,
+        time: data.time || "06:00",
+        minutes:
+          typeof data.minutes === "number" && !Number.isNaN(data.minutes)
+            ? data.minutes
+            : 15,
+        aspersorId: data.aspersorId || "aspersor1",
+      });
     });
+
     return unsub;
   }, []);
 
@@ -190,10 +197,11 @@ function useSchedule() {
       alert("Selecione pelo menos um dia da semana!");
       return;
     }
-    await setDoc(doc(db, "agendamentos", `prog-${Date.now()}`), {
+
+    await setDoc(doc(db, "agendamentos", "aspersor1"), {
       aspersorId: "aspersor1",
-      time: newSched.start,
-      minutes: newSched.duration,
+      time: newSched.time,         // <- bate com Node-RED (campo "time")
+      minutes: newSched.minutes,   // <- bate com Node-RED (campo "minutes")
       days: diasSelecionados,
       createdAt: new Date(),
     });
@@ -462,7 +470,11 @@ function ScheduleCard({ schedule, onSave }) {
 
   const toggleDay = (i) =>
     setDays((old) => old.map((v, idx) => (idx === i ? !v : v)));
-  const save = () => onSave({ days, start, duration });
+
+  // 🔴 Aqui é onde você queria saber “onde alterar”:
+  // agora passamos time/minutes pra bater com o Node-RED
+  const save = () => onSave({ days, time: start, minutes: duration });
+
   const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
   return (
@@ -521,7 +533,7 @@ function ScheduleCard({ schedule, onSave }) {
   );
 }
 
-// 📋 Lista de agendamentos
+// 📋 Lista de agendamentos (histórico)
 function ScheduleList() {
   const [items, setItems] = useState([]);
 
@@ -571,7 +583,7 @@ function ScheduleList() {
   );
 }
 
-// 📈 Histórico (gráfico) – MÉDIA DIÁRIA
+// 📈 Histórico (média diária)
 function HumidityHistory({ data }) {
   const ticks = useMemo(() => data.map((d) => d.dateLabel), [data]);
 
@@ -607,9 +619,9 @@ function HumidityHistory({ data }) {
 
 // ===================== APP PRINCIPAL =====================
 export default function App() {
-  const history = useHumidityHistory(); // leituras individuais
-  const currentHum = useCurrentHumidity(history); // umidade atual
-  const dailyAverageHistory = useDailyAverageHistory(); // média diária
+  const history = useHumidityHistory();
+  const currentHum = useCurrentHumidity(history);
+  const dailyAverageHistory = useDailyAverageHistory();
   const { settings, save: saveAuto } = useAutoSettings();
   const { schedule, save: saveSchedule } = useSchedule();
 
