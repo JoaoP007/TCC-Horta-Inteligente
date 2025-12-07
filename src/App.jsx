@@ -158,7 +158,7 @@ function useAutoSettings() {
   return { settings, save };
 }
 
-// 📅 Agendamento de irrigação (usa UM doc fixo: agendamentos/aspersor1)
+// 📅 Agendamento de irrigação – múltiplos agendamentos
 function useSchedule() {
   const [schedule, setSchedule] = useState({
     days: [false, false, false, false, false, false, false],
@@ -168,12 +168,22 @@ function useSchedule() {
   });
 
   useEffect(() => {
-    const ref = doc(db, "agendamentos", "aspersor1");
-    const unsub = onSnapshot(ref, (snap) => {
-      if (!snap.exists()) return;
-      const data = snap.data();
+    const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
-      const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    // Escuta TODOS os documentos da coleção "agendamentos"
+    const unsub = onSnapshot(collection(db, "agendamentos"), (snap) => {
+      const arr = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        // mais recente primeiro (usa createdAt se houver)
+        .sort(
+          (a, b) =>
+            (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)
+        );
+
+      // se não tiver nenhum, mantém valores padrão
+      if (!arr[0]) return;
+
+      const data = arr[0]; // mostra na tela SEMPRE o agendamento mais recente
       const diasBool = labels.map((d) => data.days?.includes(d));
 
       setSchedule({
@@ -190,6 +200,7 @@ function useSchedule() {
     return unsub;
   }, []);
 
+  // SALVA um novo documento SEMPRE com ID único (prog-timestamp)
   const save = async (newSched) => {
     const labels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     const diasSelecionados = labels.filter((_, i) => newSched.days[i]);
@@ -198,10 +209,10 @@ function useSchedule() {
       return;
     }
 
-    await setDoc(doc(db, "agendamentos", "aspersor1"), {
+    await setDoc(doc(db, "agendamentos", `prog-${Date.now()}`), {
       aspersorId: "aspersor1",
-      time: newSched.time,         // <- bate com Node-RED (campo "time")
-      minutes: newSched.minutes,   // <- bate com Node-RED (campo "minutes")
+      time: newSched.time,       // Node-RED usa campo "time"
+      minutes: newSched.minutes, // e "minutes"
       days: diasSelecionados,
       createdAt: new Date(),
     });
